@@ -1,0 +1,95 @@
+import axios from 'axios';
+
+const API_BASE = '/api';
+
+const api = axios.create({
+  baseURL: API_BASE,
+});
+
+// Add auth token to requests
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// Handle 401 responses
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      window.location.href = '/login';
+    }
+    return Promise.reject(error);
+  }
+);
+
+// ===================== Auth =====================
+export const authAPI = {
+  login: (username, password) => api.post('/auth/login', { username, password }),
+  getMe: () => api.get('/auth/me'),
+  getUsers: () => api.get('/auth/users'),
+  createUser: (data) => api.post('/auth/users', data),
+  updateUser: (id, data) => api.put(`/auth/users/${id}`, data),
+  deleteUser: (id) => api.delete(`/auth/users/${id}`),
+};
+
+// ===================== Products =====================
+export const productsAPI = {
+  getAll: () => api.get('/products/'),
+  getAllAdmin: () => api.get('/products/all'),
+  get: (id) => api.get(`/products/${id}`),
+  create: (data) => api.post('/products/', data),
+  update: (id, data) => api.put(`/products/${id}`, data),
+  delete: (id) => api.delete(`/products/${id}`),
+  uploadImage: (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post('/products/upload-image', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+  updateStock: (id, quantity) => api.put(`/products/${id}/stock?quantity=${quantity}`),
+  getCategories: () => api.get('/products/categories'),
+  createCategory: (data) => api.post('/products/categories', data),
+  updateCategory: (id, data) => api.put(`/products/categories/${id}`, data),
+  deleteCategory: (id) => api.delete(`/products/categories/${id}`),
+};
+
+// ===================== Sales =====================
+export const salesAPI = {
+  create: (data) => api.post('/sales/', data),
+  getAll: (skip = 0, limit = 50) => api.get(`/sales/?skip=${skip}&limit=${limit}`),
+  get: (id) => api.get(`/sales/${id}`),
+};
+
+// ===================== Donations =====================
+export const donationsAPI = {
+  create: (data) => api.post('/donations/', data),
+  getAll: (skip = 0, limit = 50) => api.get(`/donations/?skip=${skip}&limit=${limit}`),
+  get: (id) => api.get(`/donations/${id}`),
+  delete: (id) => api.delete(`/donations/${id}`),
+};
+
+// ===================== Reports =====================
+export const reportsAPI = {
+  getDashboard: () => api.get('/reports/dashboard'),
+  getSalesReport: (startDate, endDate) => {
+    const params = new URLSearchParams();
+    if (startDate) params.append('start_date', startDate);
+    if (endDate) params.append('end_date', endDate);
+    return api.get(`/reports/sales-report?${params}`);
+  },
+  getDonationsReport: (startDate, endDate) => {
+    const params = new URLSearchParams();
+    if (startDate) params.append('start_date', startDate);
+    if (endDate) params.append('end_date', endDate);
+    return api.get(`/reports/donations-report?${params}`);
+  },
+};
+
+export default api;

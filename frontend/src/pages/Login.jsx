@@ -1,0 +1,92 @@
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { authAPI } from '../services/api';
+import toast from 'react-hot-toast';
+
+export default function Login() {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!username || !password) {
+      toast.error('الرجاء إدخال اسم المستخدم وكلمة المرور');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await authAPI.login(username, password);
+      localStorage.setItem('token', res.data.access_token);
+      localStorage.setItem('user', JSON.stringify(res.data.user));
+      toast.success(`مرحباً ${res.data.user.full_name}`);
+      navigate('/');
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'خطأ في تسجيل الدخول');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-bayan-dark via-bayan-green to-emerald-600 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8">
+        {/* Header */}
+        <div className="text-center mb-8">
+          <div className="w-20 h-20 bg-bayan-green rounded-full mx-auto flex items-center justify-center mb-4">
+            <span className="text-3xl text-white font-bold">بيان</span>
+          </div>
+          <h1 className="text-2xl font-bold text-gray-800">جمعية بيان بمكة المكرمة</h1>
+          <p className="text-gray-500 mt-2">نظام نقاط البيع</p>
+        </div>
+
+        {/* Form */}
+        <form onSubmit={handleSubmit} className="space-y-5">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              اسم المستخدم
+            </label>
+            <input
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green focus:border-transparent outline-none transition-all text-right"
+              placeholder="أدخل اسم المستخدم"
+              autoFocus
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              كلمة المرور
+            </label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green focus:border-transparent outline-none transition-all text-right"
+              placeholder="أدخل كلمة المرور"
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-bayan-green hover:bg-bayan-dark text-white font-bold py-3 px-4 rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {loading ? 'جاري الدخول...' : 'تسجيل الدخول'}
+          </button>
+        </form>
+
+        {/* Footer */}
+        <div className="mt-8 text-center">
+          <p className="text-xs text-gray-400">
+            www.bayanmakkah.org.sa
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
