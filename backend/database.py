@@ -61,6 +61,7 @@ class Sale(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     total = Column(Float, nullable=False)
     payment_method = Column(String(20), nullable=False)  # cash / card / transfer
+    card_ref = Column(String(100), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="sales")
@@ -89,6 +90,7 @@ class Donation(Base):
     amount = Column(Float, nullable=False)
     note = Column(Text, nullable=True)
     payment_method = Column(String(20), nullable=False, default="cash")
+    card_ref = Column(String(100), nullable=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 

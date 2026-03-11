@@ -18,6 +18,7 @@ class SaleItemCreate(BaseModel):
 class SaleCreate(BaseModel):
     items: list[SaleItemCreate]
     payment_method: str  # cash / card / transfer
+    card_ref: str | None = None
 
 
 class SaleItemResponse(BaseModel):
@@ -38,6 +39,7 @@ class SaleResponse(BaseModel):
     user_name: str | None = None
     total: float
     payment_method: str
+    card_ref: str | None = None
     items: list[SaleItemResponse]
     created_at: datetime
 
@@ -76,6 +78,7 @@ def create_sale(request: SaleCreate, db: Session = Depends(get_db), current_user
         user_id=current_user.id,
         total=round(total, 2),
         payment_method=request.payment_method,
+        card_ref=request.card_ref,
     )
     db.add(sale)
     db.flush()
@@ -124,6 +127,7 @@ def _format_sale(sale: Sale) -> dict:
         "user_name": sale.user.full_name if sale.user else None,
         "total": sale.total,
         "payment_method": sale.payment_method,
+        "card_ref": sale.card_ref,
         "created_at": sale.created_at,
         "items": [
             {

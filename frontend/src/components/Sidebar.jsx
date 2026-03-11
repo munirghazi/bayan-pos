@@ -1,4 +1,5 @@
 import { NavLink, useNavigate } from 'react-router-dom';
+import { getPOSSettings } from '../utils/posSettings';
 import {
   HiOutlineViewGrid,
   HiOutlineShoppingCart,
@@ -21,6 +22,7 @@ const menuItems = [
 export default function Sidebar() {
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem('user') || '{}');
+  const posSettings = getPOSSettings();
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -28,16 +30,27 @@ export default function Sidebar() {
     navigate('/login');
   };
 
-  const filteredMenu = user.role === 'admin'
+  let filteredMenu = user.role === 'admin'
     ? menuItems
     : menuItems.filter(item => !['/settings'].includes(item.path));
+
+  if (!posSettings.showDonation) {
+    filteredMenu = filteredMenu.filter(item => item.path !== '/donations');
+  }
 
   return (
     <aside className="w-64 bg-bayan-dark min-h-screen flex flex-col shadow-xl">
       {/* Logo / Header */}
-      <div className="p-6 border-b border-bayan-green/30">
-        <h1 className="text-xl font-bold text-white text-center">جمعية بيان</h1>
-        <p className="text-emerald-300 text-sm text-center mt-1">نظام نقاط البيع</p>
+      <div className="p-6 border-b border-bayan-green/30 text-center">
+        {posSettings.logoUrl ? (
+          <img
+            src={posSettings.logoUrl}
+            alt="شعار الجمعية"
+            className="h-14 mx-auto mb-2 object-contain"
+          />
+        ) : null}
+        <h1 className="text-xl font-bold text-white">جمعية بيان</h1>
+        <p className="text-emerald-300 text-sm mt-1">نظام نقاط البيع</p>
       </div>
 
       {/* Navigation */}

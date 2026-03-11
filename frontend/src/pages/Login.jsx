@@ -1,13 +1,20 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { authAPI } from '../services/api';
+import { authAPI, settingsAPI } from '../services/api';
 import toast from 'react-hot-toast';
 
 export default function Login() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [logoUrl, setLogoUrl] = useState('');
   const navigate = useNavigate();
+
+  useEffect(() => {
+    settingsAPI.getLogo().then((res) => {
+      if (res.data.url) setLogoUrl(res.data.url);
+    }).catch(() => {});
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -35,9 +42,17 @@ export default function Login() {
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8">
         {/* Header */}
         <div className="text-center mb-8">
-          <div className="w-20 h-20 bg-bayan-green rounded-full mx-auto flex items-center justify-center mb-4">
-            <span className="text-3xl text-white font-bold">بيان</span>
-          </div>
+          {logoUrl ? (
+            <img
+              src={logoUrl}
+              alt="شعار الجمعية"
+              className="h-20 mx-auto mb-4 object-contain"
+            />
+          ) : (
+            <div className="w-20 h-20 bg-bayan-green rounded-full mx-auto flex items-center justify-center mb-4">
+              <span className="text-3xl text-white font-bold">بيان</span>
+            </div>
+          )}
           <h1 className="text-2xl font-bold text-gray-800">جمعية بيان بمكة المكرمة</h1>
           <p className="text-gray-500 mt-2">نظام نقاط البيع</p>
         </div>

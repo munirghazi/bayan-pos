@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { productsAPI, salesAPI, donationsAPI } from '../services/api';
 import Receipt from '../components/Receipt';
 import { SarIcon } from '../components/SarIcon';
 import { printReceipt } from '../utils/printReceipt';
 import { downloadPDF, shareViaWhatsApp, shareViaEmail } from '../utils/generatePDF';
+import { getPOSSettings } from '../utils/posSettings';
 import toast from 'react-hot-toast';
 import {
   HiOutlineSearch,
@@ -26,12 +27,19 @@ const WhatsAppIcon = () => (
   </svg>
 );
 
+const ALL_PAYMENT_METHODS = [
+  { key: 'cash', icon: HiOutlineCash, label: 'نقدي' },
+  { key: 'card', icon: HiOutlineCreditCard, label: 'شبكة' },
+  { key: 'transfer', icon: HiOutlineDeviceMobile, label: 'تحويل' },
+];
+
 export default function POS() {
   const [products, setProducts] = useState([]);
   const [cart, setCart] = useState([]);
   const [search, setSearch] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [cashReceived, setCashReceived] = useState('');
+  const [cardRef, setCardRef] = useState('');
   const [loading, setLoading] = useState(false);
   const [lastSale, setLastSale] = useState(null);
   const [showReceipt, setShowReceipt] = useState(false);
@@ -39,13 +47,28 @@ export default function POS() {
   const [donationAmount, setDonationAmount] = useState('');
   const [donorName, setDonorName] = useState('');
   const [donationNote, setDonationNote] = useState('');
+  const [donationCardRef, setDonationCardRef] = useState('');
   const [lastDonation, setLastDonation] = useState(null);
   const [showShareMenu, setShowShareMenu] = useState(false);
   const receiptRef = useRef(null);
 
+  const posSettings = getPOSSettings();
+
+  const enabledPaymentMethods = useMemo(() => {
+    const methods = ALL_PAYMENT_METHODS.filter((m) => posSettings.paymentMethods[m.key]);
+    return methods.length > 0 ? methods : ALL_PAYMENT_METHODS;
+  }, [posSettings.paymentMethods]);
+
   useEffect(() => {
     loadProducts();
   }, []);
+
+  useEffect(() => {
+    if (!posSettings.paymentMethods[paymentMethod]) {
+      const first = enabledPaymentMethods[0];
+      if (first) setPaymentMethod(first.key);
+    }
+  }, [posSettings.paymentMethods]);
 
   const loadProducts = async () => {
     try {
@@ -115,6 +138,11 @@ export default function POS() {
       return;
     }
 
+    if (paymentMethod === 'card' && !cardRef.trim()) {
+      toast.error('الرجاء إدخال رمز العملية');
+      return;
+    }
+
     setLoading(true);
     try {
       const res = await salesAPI.create({
@@ -123,6 +151,7 @@ export default function POS() {
           quantity: item.quantity,
         })),
         payment_method: paymentMethod,
+        card_ref: paymentMethod === 'card' ? cardRef.trim() : null,
       });
 
       setLastSale(res.data);
@@ -130,6 +159,7 @@ export default function POS() {
       setShowReceipt(true);
       setCart([]);
       setCashReceived('');
+      setCardRef('');
       loadProducts();
       toast.success('تمت عملية البيع بنجاح');
     } catch (err) {
@@ -146,6 +176,11 @@ export default function POS() {
       return;
     }
 
+    if (paymentMethod === 'card' && !donationCardRef.trim()) {
+      toast.error('الرجاء إدخال رمز العملية');
+      return;
+    }
+
     setLoading(true);
     try {
       const res = await donationsAPI.create({
@@ -153,6 +188,7 @@ export default function POS() {
         amount,
         note: donationNote || null,
         payment_method: paymentMethod,
+        card_ref: paymentMethod === 'card' ? donationCardRef.trim() : null,
       });
 
       setLastDonation(res.data);
@@ -162,6 +198,7 @@ export default function POS() {
       setDonationAmount('');
       setDonorName('');
       setDonationNote('');
+      setDonationCardRef('');
       toast.success('تم تسجيل التبرع بنجاح - جزاكم الله خيراً');
     } catch (err) {
       toast.error(err.response?.data?.detail || 'خطأ في تسجيل التبرع');
@@ -233,13 +270,15 @@ export default function POS() {
               className="w-full pr-10 pl-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-bayan-green focus:border-transparent outline-none"
             />
           </div>
-          <button
-            onClick={() => setShowDonation(true)}
-            className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-xl transition-all font-medium"
-          >
-            <HiOutlineHeart className="text-xl" />
-            تبرع
-          </button>
+          {posSettings.showDonation && (
+            <button
+              onClick={() => setShowDonation(true)}
+              className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-xl transition-all font-medium"
+            >
+              <HiOutlineHeart className="text-xl" />
+              تبرع
+            </button>
+          )}
         </div>
 
         {/* Products */}
@@ -337,12 +376,8 @@ export default function POS() {
           </div>
 
           {/* Payment Method */}
-          <div className="grid grid-cols-3 gap-2">
-            {[
-              { key: 'cash', icon: HiOutlineCash, label: 'نقدي' },
-              { key: 'card', icon: HiOutlineCreditCard, label: 'شبكة' },
-              { key: 'transfer', icon: HiOutlineDeviceMobile, label: 'تحويل' },
-            ].map(({ key, icon: Icon, label }) => (
+          <div className={`grid gap-2 ${enabledPaymentMethods.length === 1 ? 'grid-cols-1' : enabledPaymentMethods.length === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
+            {enabledPaymentMethods.map(({ key, icon: Icon, label }) => (
               <button
                 key={key}
                 onClick={() => setPaymentMethod(key)}
@@ -373,6 +408,20 @@ export default function POS() {
                   الباقي: {change.toFixed(2)} <SarIcon size={16} />
                 </p>
               )}
+            </div>
+          )}
+
+          {/* Card reference input */}
+          {paymentMethod === 'card' && cart.length > 0 && (
+            <div>
+              <input
+                type="text"
+                value={cardRef}
+                onChange={(e) => setCardRef(e.target.value)}
+                placeholder="رمز العملية *"
+                className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none text-center text-lg"
+                dir="ltr"
+              />
             </div>
           )}
 
@@ -430,12 +479,8 @@ export default function POS() {
               </div>
 
               {/* Payment method */}
-              <div className="grid grid-cols-3 gap-2">
-                {[
-                  { key: 'cash', icon: HiOutlineCash, label: 'نقدي' },
-                  { key: 'card', icon: HiOutlineCreditCard, label: 'شبكة' },
-                  { key: 'transfer', icon: HiOutlineDeviceMobile, label: 'تحويل' },
-                ].map(({ key, icon: Icon, label }) => (
+              <div className={`grid gap-2 ${enabledPaymentMethods.length === 1 ? 'grid-cols-1' : enabledPaymentMethods.length === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
+                {enabledPaymentMethods.map(({ key, icon: Icon, label }) => (
                   <button
                     key={key}
                     onClick={() => setPaymentMethod(key)}
@@ -450,6 +495,20 @@ export default function POS() {
                   </button>
                 ))}
               </div>
+
+              {/* Card reference for donation */}
+              {paymentMethod === 'card' && (
+                <div>
+                  <input
+                    type="text"
+                    value={donationCardRef}
+                    onChange={(e) => setDonationCardRef(e.target.value)}
+                    placeholder="رمز العملية *"
+                    className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-purple-500 outline-none text-center text-lg"
+                    dir="ltr"
+                  />
+                </div>
+              )}
 
               <div className="flex gap-3 mt-4">
                 <button

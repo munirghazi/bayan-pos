@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
-import { authAPI } from '../services/api';
+import { useState, useEffect, useRef } from 'react';
+import { authAPI, settingsAPI } from '../services/api';
 import { getZATCASettings, saveZATCASettings } from '../utils/zatca';
+import { getPOSSettings, savePOSSettings } from '../utils/posSettings';
 import toast from 'react-hot-toast';
 import {
   HiOutlineUsers,
@@ -11,6 +12,12 @@ import {
   HiOutlineDocumentText,
   HiOutlineSave,
   HiOutlineOfficeBuilding,
+  HiOutlineCash,
+  HiOutlineCreditCard,
+  HiOutlineDeviceMobile,
+  HiOutlineHeart,
+  HiOutlinePhotograph,
+  HiOutlineAdjustments,
 } from 'react-icons/hi';
 
 export default function Settings() {
@@ -30,11 +37,48 @@ export default function Settings() {
   // Company profile & ZATCA settings combined
   const [profileForm, setProfileForm] = useState(getZATCASettings());
 
+  // POS settings
+  const [posSettings, setPosSettings] = useState(getPOSSettings());
+  const [logoPreview, setLogoPreview] = useState('');
+  const logoInputRef = useRef(null);
+
   const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
 
   useEffect(() => {
     loadUsers();
+    loadLogo();
   }, []);
+
+  const loadLogo = async () => {
+    try {
+      const res = await settingsAPI.getLogo();
+      if (res.data.url) {
+        setLogoPreview(res.data.url);
+        setPosSettings((prev) => ({ ...prev, logoUrl: res.data.url }));
+      }
+    } catch (err) {}
+  };
+
+  const handleLogoUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const res = await settingsAPI.uploadLogo(file);
+      const url = res.data.url;
+      setLogoPreview(url);
+      const updated = { ...posSettings, logoUrl: url };
+      setPosSettings(updated);
+      savePOSSettings(updated);
+      toast.success('تم رفع الشعار بنجاح');
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'خطأ في رفع الشعار');
+    }
+  };
+
+  const handleSavePOSSettings = () => {
+    savePOSSettings(posSettings);
+    toast.success('تم حفظ إعدادات نقطة البيع');
+  };
 
   const loadUsers = async () => {
     try {
@@ -157,7 +201,7 @@ export default function Settings() {
       </div>
 
       {/* Section Tabs */}
-      <div className="flex bg-gray-100 rounded-lg p-1 w-fit">
+      <div className="flex bg-gray-100 rounded-lg p-1 w-fit flex-wrap gap-1">
         <button
           onClick={() => setActiveSection('profile')}
           className={`flex items-center gap-2 px-6 py-2 rounded-lg font-medium transition-all ${
@@ -168,6 +212,17 @@ export default function Settings() {
         >
           <HiOutlineOfficeBuilding />
           بيانات الجمعية
+        </button>
+        <button
+          onClick={() => setActiveSection('pos')}
+          className={`flex items-center gap-2 px-6 py-2 rounded-lg font-medium transition-all ${
+            activeSection === 'pos'
+              ? 'bg-bayan-green text-white shadow'
+              : 'text-gray-600 hover:text-gray-800'
+          }`}
+        >
+          <HiOutlineAdjustments />
+          إعدادات نقطة البيع
         </button>
         <button
           onClick={() => setActiveSection('users')}
@@ -295,6 +350,136 @@ export default function Settings() {
               <li>المنتجات المعفاة من الضريبة لا تُحسب عليها ضريبة القيمة المضافة</li>
               <li>يمكن تعيين إعفاء المنتج من الضريبة من صفحة إدارة المنتجات</li>
             </ul>
+          </div>
+        </div>
+      )}
+
+      {/* ===== POS Settings Section ===== */}
+      {activeSection === 'pos' && (
+        <div className="space-y-6">
+          {/* Logo Upload */}
+          <div className="bg-white rounded-xl border p-6 space-y-4">
+            <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+              <HiOutlinePhotograph className="text-bayan-green" />
+              شعار الجمعية
+            </h2>
+            <p className="text-sm text-gray-500">يظهر الشعار في صفحة الدخول والقائمة الجانبية والفواتير</p>
+
+            <div className="flex items-center gap-6">
+              {logoPreview ? (
+                <img
+                  src={logoPreview}
+                  alt="شعار الجمعية"
+                  className="w-24 h-24 object-contain rounded-xl border border-gray-200 bg-gray-50 p-1"
+                />
+              ) : (
+                <div className="w-24 h-24 rounded-xl border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400">
+                  <HiOutlinePhotograph className="text-3xl" />
+                </div>
+              )}
+              <div>
+                <input
+                  ref={logoInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleLogoUpload}
+                  className="hidden"
+                />
+                <button
+                  onClick={() => logoInputRef.current?.click()}
+                  className="flex items-center gap-2 bg-bayan-green hover:bg-bayan-dark text-white px-6 py-2 rounded-lg transition-all"
+                >
+                  <HiOutlinePhotograph />
+                  {logoPreview ? 'تغيير الشعار' : 'رفع شعار'}
+                </button>
+                <p className="text-xs text-gray-400 mt-2">PNG, JPG, SVG - يفضل خلفية شفافة</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Payment Methods */}
+          <div className="bg-white rounded-xl border p-6 space-y-4">
+            <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+              <HiOutlineCash className="text-bayan-green" />
+              طرق الدفع
+            </h2>
+            <p className="text-sm text-gray-500">اختر طرق الدفع المتاحة في نقطة البيع</p>
+
+            <div className="space-y-3">
+              {[
+                { key: 'cash', icon: HiOutlineCash, label: 'نقدي', desc: 'الدفع النقدي' },
+                { key: 'card', icon: HiOutlineCreditCard, label: 'شبكة', desc: 'الدفع عبر الشبكة (يطلب رمز العملية)' },
+                { key: 'transfer', icon: HiOutlineDeviceMobile, label: 'تحويل', desc: 'التحويل البنكي' },
+              ].map(({ key, icon: Icon, label, desc }) => (
+                <label
+                  key={key}
+                  className={`flex items-center gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                    posSettings.paymentMethods[key]
+                      ? 'border-bayan-green bg-bayan-light/30'
+                      : 'border-gray-200 bg-gray-50 opacity-60'
+                  }`}
+                >
+                  <div className="relative">
+                    <input
+                      type="checkbox"
+                      checked={posSettings.paymentMethods[key]}
+                      onChange={(e) => {
+                        const updated = {
+                          ...posSettings,
+                          paymentMethods: {
+                            ...posSettings.paymentMethods,
+                            [key]: e.target.checked,
+                          },
+                        };
+                        const enabledCount = Object.values(updated.paymentMethods).filter(Boolean).length;
+                        if (enabledCount === 0) {
+                          toast.error('يجب تفعيل طريقة دفع واحدة على الأقل');
+                          return;
+                        }
+                        setPosSettings(updated);
+                      }}
+                      className="w-5 h-5 text-bayan-green rounded focus:ring-bayan-green"
+                    />
+                  </div>
+                  <Icon className="text-2xl text-gray-600" />
+                  <div>
+                    <p className="font-medium text-gray-800">{label}</p>
+                    <p className="text-xs text-gray-500">{desc}</p>
+                  </div>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {/* Donation Toggle */}
+          <div className="bg-white rounded-xl border p-6 space-y-4">
+            <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+              <HiOutlineHeart className="text-purple-600" />
+              خيار التبرع
+            </h2>
+            <label className="flex items-center gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all border-gray-200">
+              <input
+                type="checkbox"
+                checked={posSettings.showDonation}
+                onChange={(e) => setPosSettings({ ...posSettings, showDonation: e.target.checked })}
+                className="w-5 h-5 text-purple-600 rounded focus:ring-purple-500"
+              />
+              <div>
+                <p className="font-medium text-gray-800">إظهار زر التبرع في نقطة البيع</p>
+                <p className="text-xs text-gray-500">عند التعطيل، لن يظهر زر التبرع في شاشة نقطة البيع</p>
+              </div>
+            </label>
+          </div>
+
+          {/* Save POS Settings */}
+          <div className="flex justify-end">
+            <button
+              onClick={handleSavePOSSettings}
+              className="flex items-center gap-2 bg-bayan-green hover:bg-bayan-dark text-white px-8 py-3 rounded-xl transition-all font-bold"
+            >
+              <HiOutlineSave className="text-xl" />
+              حفظ إعدادات نقطة البيع
+            </button>
           </div>
         </div>
       )}

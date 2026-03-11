@@ -92,4 +92,16 @@ export const reportsAPI = {
   },
 };
 
+// ===================== Settings =====================
+export const settingsAPI = {
+  uploadLogo: (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post('/settings/upload-logo', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+  getLogo: () => api.get('/settings/logo'),
+};
+
 export default api;

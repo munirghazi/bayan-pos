@@ -2,6 +2,7 @@ import { forwardRef, useMemo } from 'react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { SarIcon } from './SarIcon';
 import { generateZATCAQR, getZATCASettings, calculateItemsVAT, calculateVAT } from '../utils/zatca';
+import { getPOSSettings } from '../utils/posSettings';
 
 const paymentMethodAr = {
   cash: 'نقدي',
@@ -12,6 +13,8 @@ const paymentMethodAr = {
 const Receipt = forwardRef(({ sale, type = 'sale', donation = null }, ref) => {
   const now = new Date();
   const zatca = getZATCASettings();
+  const posSettings = getPOSSettings();
+  const logoUrl = posSettings.logoUrl;
 
   // Calculate VAT with tax-exempt items support
   const vatInfo = useMemo(() => {
@@ -50,7 +53,14 @@ const Receipt = forwardRef(({ sale, type = 'sale', donation = null }, ref) => {
     <div ref={ref} className="receipt-content bg-white p-6 max-w-sm mx-auto text-sm" dir="rtl" style={{ fontFamily: 'Cairo, sans-serif' }}>
       {/* Header */}
       <div className="text-center border-b-2 border-dashed border-gray-400 pb-4 mb-4">
-        <h2 className="text-lg font-bold text-gray-800">جمعية بيان بمكة المكرمة</h2>
+        {logoUrl && (
+          <img
+            src={logoUrl}
+            alt="شعار الجمعية"
+            style={{ maxHeight: '64px', maxWidth: '180px', margin: '0 auto 8px', objectFit: 'contain' }}
+          />
+        )}
+        <h2 className="text-lg font-bold text-gray-800">{zatca.sellerName || 'جمعية بيان بمكة المكرمة'}</h2>
         <p className="text-gray-500 text-xs mt-1">www.bayanmakkah.org.sa</p>
         <p className="text-gray-500 text-xs">مكة المكرمة - المملكة العربية السعودية</p>
         {zatca.vatNumber && (
@@ -126,6 +136,12 @@ const Receipt = forwardRef(({ sale, type = 'sale', donation = null }, ref) => {
               <span>طريقة الدفع</span>
               <span>{paymentMethodAr[sale.payment_method] || sale.payment_method}</span>
             </div>
+            {sale.card_ref && (
+              <div className="flex justify-between text-xs text-gray-500">
+                <span>رمز العملية</span>
+                <span dir="ltr">{sale.card_ref}</span>
+              </div>
+            )}
           </div>
 
           {/* ZATCA QR Code */}
@@ -171,6 +187,12 @@ const Receipt = forwardRef(({ sale, type = 'sale', donation = null }, ref) => {
               <span className="text-gray-600">طريقة الدفع:</span>
               <span>{paymentMethodAr[donation.payment_method] || donation.payment_method}</span>
             </div>
+            {donation.card_ref && (
+              <div className="flex justify-between">
+                <span className="text-gray-600">رمز العملية:</span>
+                <span dir="ltr">{donation.card_ref}</span>
+              </div>
+            )}
             {donation.note && (
               <div className="flex justify-between">
                 <span className="text-gray-600">ملاحظة:</span>

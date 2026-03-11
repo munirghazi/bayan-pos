@@ -15,6 +15,7 @@ class DonationCreate(BaseModel):
     amount: float
     note: str | None = None
     payment_method: str = "cash"
+    card_ref: str | None = None
 
 
 class DonationResponse(BaseModel):
@@ -23,6 +24,7 @@ class DonationResponse(BaseModel):
     amount: float
     note: str | None
     payment_method: str
+    card_ref: str | None = None
     user_id: int
     user_name: str | None = None
     created_at: datetime
@@ -43,6 +45,7 @@ def create_donation(request: DonationCreate, db: Session = Depends(get_db), curr
         amount=request.amount,
         note=request.note,
         payment_method=request.payment_method,
+        card_ref=request.card_ref,
         user_id=current_user.id,
     )
     db.add(donation)
@@ -88,6 +91,7 @@ def _format_donation(donation: Donation) -> dict:
         "amount": donation.amount,
         "note": donation.note,
         "payment_method": donation.payment_method,
+        "card_ref": donation.card_ref,
         "user_id": donation.user_id,
         "user_name": donation.user.full_name if donation.user else None,
         "created_at": donation.created_at,

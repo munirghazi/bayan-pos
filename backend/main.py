@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from database import create_tables
-from routers import auth, products, sales, donations, reports
+from routers import auth, products, sales, donations, reports, settings
 import os
 
 app = FastAPI(title="نظام نقاط البيع - جمعية بيان", version="1.0.0")
@@ -27,6 +27,7 @@ app.include_router(products.router, prefix="/api/products", tags=["المنتج�
 app.include_router(sales.router, prefix="/api/sales", tags=["المبيعات"])
 app.include_router(donations.router, prefix="/api/donations", tags=["التبرعات"])
 app.include_router(reports.router, prefix="/api/reports", tags=["التقارير"])
+app.include_router(settings.router, prefix="/api/settings", tags=["الإعدادات"])
 
 # --- Serve frontend build in production ---
 FRONTEND_BUILD = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
@@ -80,7 +81,21 @@ def startup():
         cursor.execute("ALTER TABLE sale_items ADD COLUMN is_tax_exempt BOOLEAN DEFAULT 0")
         conn.commit()
     except sqlite3.OperationalError:
-        pass  # Column already exists
+        pass
+
+    # Add card_ref to sales table
+    try:
+        cursor.execute("ALTER TABLE sales ADD COLUMN card_ref VARCHAR(100)")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+    # Add card_ref to donations table
+    try:
+        cursor.execute("ALTER TABLE donations ADD COLUMN card_ref VARCHAR(100)")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
 
     conn.close()
 
