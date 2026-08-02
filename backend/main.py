@@ -3,8 +3,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from passlib.context import CryptContext
 from sqlalchemy import text
 
@@ -86,17 +87,27 @@ app.include_router(settings_router.router, prefix="/api/settings", tags=["الإ
 # --- Serve frontend build in production ---
 FRONTEND_BUILD = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
 if os.path.isdir(FRONTEND_BUILD):
-    app.mount("/assets", StaticFiles(directory=os.path.join(FRONTEND_BUILD, "assets")),
-              name="frontend-assets")
+    _assets = os.path.join(FRONTEND_BUILD, "assets")
+    if os.path.isdir(_assets):
+        app.mount("/assets", StaticFiles(directory=_assets), name="frontend-assets")
 
-    @app.get("/{full_path:path}")
-    async def serve_frontend(request: Request, full_path: str):
-        if full_path.startswith("api/") or full_path.startswith("uploads/"):
-            return
-        file_path = os.path.join(FRONTEND_BUILD, full_path)
-        if full_path and os.path.isfile(file_path):
-            return FileResponse(file_path)
-        return FileResponse(os.path.join(FRONTEND_BUILD, "index.html"))
+    # Serve the SPA via a 404 fallback instead of a greedy catch-all route.
+    # A catch-all `/{path}` route would shadow the API (e.g. POST /api/products
+    # -> 405) and break trailing-slash redirects; a 404 handler leaves every real
+    # API route intact and only steps in for unknown GET paths (client routes).
+    @app.exception_handler(StarletteHTTPException)
+    async def spa_fallback(request: Request, exc: StarletteHTTPException):
+        path = request.url.path
+        if (exc.status_code == 404 and request.method == "GET"
+                and not path.startswith("/api") and not path.startswith("/uploads")):
+            candidate = os.path.join(FRONTEND_BUILD, path.lstrip("/"))
+            if path not in ("", "/") and os.path.isfile(candidate):
+                return FileResponse(candidate)
+            index = os.path.join(FRONTEND_BUILD, "index.html")
+            if os.path.isfile(index):
+                return FileResponse(index)
+        return JSONResponse({"detail": exc.detail}, status_code=exc.status_code,
+                            headers=getattr(exc, "headers", None))
 
 
 if __name__ == "__main__":

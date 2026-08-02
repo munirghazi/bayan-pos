@@ -10,7 +10,7 @@ import main
 from config import settings
 
 PASSWORD = settings.bootstrap_admin_password
-RAW_DSN = "host=/tmp port=5433 dbname=pos user=pos_app password=app_pw"
+RAW_DSN = settings.database_url.replace("+psycopg2", "")   # portable: read from .env
 
 
 @pytest.fixture(scope="module")
