@@ -1,0 +1,27 @@
+# Caddy v2 — automatic HTTPS + security headers.
+# Replace your-domain.sa. Point DNS at the server first; Caddy fetches the cert.
+
+your-domain.sa {
+    encode zstd gzip
+
+    # FastAPI/uvicorn runs on 127.0.0.1:8000 and serves both the API and the
+    # built SPA (frontend/dist). Simplest: proxy everything to it.
+    reverse_proxy 127.0.0.1:8000
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options    nosniff
+        X-Frame-Options           DENY
+        Referrer-Policy           strict-origin-when-cross-origin
+    }
+
+    # --- Optional optimization: let Caddy serve the static SPA directly and
+    # --- only proxy the API (lighter than serving static through Python):
+    # @backend path /api/* /uploads/* /health
+    # handle @backend { reverse_proxy 127.0.0.1:8000 }
+    # handle {
+    #     root * /srv/bayan-pos/frontend/dist
+    #     try_files {path} /index.html
+    #     file_server
+    # }
+}

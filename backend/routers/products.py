@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from database import get_db, Product, Category
+from database import get_db, Product, Category, KitComponent
 from routers.auth import get_current_user, require_admin, User
+from kits import available_quantity, reachable, components_of
 import os
 import shutil
 import uuid
@@ -24,6 +25,17 @@ class CategoryResponse(BaseModel):
         from_attributes = True
 
 
+class KitComponentIn(BaseModel):
+    product_id: int
+    quantity: int = 1
+
+
+class KitComponentOut(BaseModel):
+    product_id: int
+    product_name: str | None = None
+    quantity: int
+
+
 class ProductResponse(BaseModel):
     id: int
     name: str
@@ -34,6 +46,9 @@ class ProductResponse(BaseModel):
     image_url: str | None
     is_active: bool
     is_tax_exempt: bool = False
+    is_kit: bool = False
+    available_stock: int = 0
+    components: list[KitComponentOut] = []
 
     class Config:
         from_attributes = True
@@ -46,6 +61,8 @@ class ProductCreate(BaseModel):
     stock: int = 0
     image_url: str | None = None
     is_tax_exempt: bool = False
+    is_kit: bool = False
+    components: list[KitComponentIn] | None = None
 
 
 class ProductUpdate(BaseModel):
@@ -56,6 +73,59 @@ class ProductUpdate(BaseModel):
     image_url: str | None = None
     is_active: bool | None = None
     is_tax_exempt: bool | None = None
+    is_kit: bool | None = None
+    components: list[KitComponentIn] | None = None
+
+
+# ===================== Kit helpers =====================
+
+def _apply_kit_components(db: Session, product: Product, components: list[KitComponentIn]):
+    """Replace a kit's components after validation (existence, self, cycles)."""
+    db.query(KitComponent).filter(KitComponent.kit_product_id == product.id).delete()
+    db.flush()
+
+    merged: dict[int, int] = {}
+    for c in components:
+        merged[c.product_id] = merged.get(c.product_id, 0) + c.quantity
+
+    for cid, qty in merged.items():
+        if qty <= 0:
+            raise HTTPException(status_code=400, detail="كمية المكوّن يجب أن تكون أكبر من صفر")
+        if cid == product.id:
+            raise HTTPException(status_code=400, detail="لا يمكن أن يحتوي المنتج على نفسه")
+        comp = db.query(Product).filter(Product.id == cid).first()
+        if comp is None:
+            raise HTTPException(status_code=400, detail=f"المكوّن رقم {cid} غير موجود")
+        if reachable(db, cid, product.id):
+            raise HTTPException(status_code=400,
+                                detail=f"إضافة '{comp.name}' تُنشئ حلقة مكوّنات (kit دائري)")
+        db.add(KitComponent(kit_product_id=product.id, component_product_id=cid, quantity=qty))
+    db.flush()
+
+
+def _serialize(db: Session, product: Product) -> dict:
+    comps = []
+    if product.is_kit:
+        for row in components_of(db, product.id):
+            cp = db.query(Product).filter(Product.id == row.component_product_id).first()
+            comps.append({"product_id": row.component_product_id,
+                          "product_name": cp.name if cp else None,
+                          "quantity": row.quantity})
+    cat = product.category
+    return {
+        "id": product.id,
+        "name": product.name,
+        "price": product.price,
+        "category_id": product.category_id,
+        "category": {"id": cat.id, "name": cat.name} if cat else None,
+        "stock": product.stock or 0,
+        "image_url": product.image_url,
+        "is_active": product.is_active,
+        "is_tax_exempt": product.is_tax_exempt,
+        "is_kit": product.is_kit,
+        "available_stock": available_quantity(db, product),
+        "components": comps,
+    }
 
 
 # ===================== Categories =====================
@@ -99,12 +169,12 @@ def delete_category(category_id: int, db: Session = Depends(get_db), current_use
 
 @router.get("/", response_model=list[ProductResponse])
 def get_products(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    return db.query(Product).filter(Product.is_active == True).all()
+    return [_serialize(db, p) for p in db.query(Product).filter(Product.is_active == True).all()]
 
 
 @router.get("/all", response_model=list[ProductResponse])
 def get_all_products(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
-    return db.query(Product).all()
+    return [_serialize(db, p) for p in db.query(Product).all()]
 
 
 @router.get("/{product_id}", response_model=ProductResponse)
@@ -112,23 +182,32 @@ def get_product(product_id: int, db: Session = Depends(get_db), current_user: Us
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="المنتج غير موجود")
-    return product
+    return _serialize(db, product)
 
 
 @router.post("/", response_model=ProductResponse)
 def create_product(request: ProductCreate, db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
+    if request.is_kit and not request.components:
+        raise HTTPException(status_code=400, detail="المنتج المُجمّع (kit) يجب أن يحتوي على مكوّن واحد على الأقل")
+
     product = Product(
         name=request.name,
         price=request.price,
         category_id=request.category_id,
-        stock=request.stock,
+        stock=0 if request.is_kit else request.stock,
         image_url=request.image_url,
         is_tax_exempt=request.is_tax_exempt,
+        is_kit=request.is_kit,
     )
     db.add(product)
+    db.flush()
+
+    if request.is_kit:
+        _apply_kit_components(db, product, request.components)
+
     db.commit()
     db.refresh(product)
-    return product
+    return _serialize(db, product)
 
 
 @router.put("/{product_id}", response_model=ProductResponse)
@@ -143,18 +222,33 @@ def update_product(product_id: int, request: ProductUpdate, db: Session = Depend
         product.price = request.price
     if request.category_id is not None:
         product.category_id = request.category_id
-    if request.stock is not None:
-        product.stock = request.stock
     if request.image_url is not None:
         product.image_url = request.image_url
     if request.is_active is not None:
         product.is_active = request.is_active
     if request.is_tax_exempt is not None:
         product.is_tax_exempt = request.is_tax_exempt
+    if request.is_kit is not None:
+        product.is_kit = request.is_kit
+
+    db.flush()
+
+    if product.is_kit:
+        if request.components is not None:
+            if not request.components:
+                raise HTTPException(status_code=400, detail="المنتج المُجمّع (kit) يجب أن يحتوي على مكوّن واحد على الأقل")
+            _apply_kit_components(db, product, request.components)
+        elif not components_of(db, product.id):
+            raise HTTPException(status_code=400, detail="المنتج المُجمّع (kit) يجب أن يحتوي على مكوّن واحد على الأقل")
+        product.stock = 0
+    else:
+        db.query(KitComponent).filter(KitComponent.kit_product_id == product.id).delete()
+        if request.stock is not None:
+            product.stock = request.stock
 
     db.commit()
     db.refresh(product)
-    return product
+    return _serialize(db, product)
 
 
 @router.delete("/{product_id}")
@@ -188,6 +282,8 @@ def update_stock(product_id: int, quantity: int, db: Session = Depends(get_db), 
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="المنتج غير موجود")
+    if product.is_kit:
+        raise HTTPException(status_code=400, detail="لا يمكن تعديل مخزون منتج مُجمّع (kit) مباشرة؛ المخزون مشتق من المكوّنات")
     product.stock = quantity
     db.commit()
     return {"message": "تم تحديث المخزون", "stock": product.stock}

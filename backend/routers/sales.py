@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from database import get_db, Sale, SaleItem, Product
 from routers.auth import get_current_user, User
+from kits import explode_to_leaves
 from datetime import datetime
 
 router = APIRouter()
@@ -56,14 +57,16 @@ def create_sale(request: SaleCreate, db: Session = Depends(get_db), current_user
 
     total = 0.0
     sale_items = []
+    leaf_demand: dict[int, int] = {}   # leaf product id -> total units this sale needs
 
     for item in request.items:
+        if item.quantity <= 0:
+            raise HTTPException(status_code=400, detail="الكمية يجب أن تكون أكبر من صفر")
         product = db.query(Product).filter(Product.id == item.product_id).first()
         if not product:
             raise HTTPException(status_code=404, detail=f"المنتج رقم {item.product_id} غير موجود")
-        if product.stock < item.quantity:
-            raise HTTPException(status_code=400, detail=f"الكمية المطلوبة من '{product.name}' غير متوفرة. المتاح: {product.stock}")
 
+        # Kits use their fixed price; stock is deducted from leaf components.
         item_total = product.price * item.quantity
         total += item_total
         sale_items.append({
@@ -72,6 +75,16 @@ def create_sale(request: SaleCreate, db: Session = Depends(get_db), current_user
             "price": product.price,
             "is_tax_exempt": product.is_tax_exempt,
         })
+        # Explode kits down to leaf products; a plain product maps to itself.
+        explode_to_leaves(db, product, item.quantity, leaf_demand)
+
+    # Validate leaf stock across the WHOLE sale (kits + direct lines combined).
+    for leaf_id, need in leaf_demand.items():
+        leaf = db.query(Product).filter(Product.id == leaf_id).first()
+        if leaf is None:
+            raise HTTPException(status_code=400, detail=f"أحد مكوّنات المنتج (رقم {leaf_id}) غير موجود")
+        if int(leaf.stock or 0) < need:
+            raise HTTPException(status_code=400, detail=f"الكمية المطلوبة من '{leaf.name}' غير متوفرة. المتاح: {int(leaf.stock or 0)}")
 
     # Create sale
     sale = Sale(
@@ -83,17 +96,20 @@ def create_sale(request: SaleCreate, db: Session = Depends(get_db), current_user
     db.add(sale)
     db.flush()
 
-    # Create sale items and update stock
+    # Sale lines record the sold product (the kit itself, at its fixed price).
     for item_data in sale_items:
-        sale_item = SaleItem(
+        db.add(SaleItem(
             sale_id=sale.id,
             product_id=item_data["product"].id,
             quantity=item_data["quantity"],
             price=item_data["price"],
             is_tax_exempt=item_data["is_tax_exempt"],
-        )
-        db.add(sale_item)
-        item_data["product"].stock -= item_data["quantity"]
+        ))
+
+    # Deduct stock from leaf products only.
+    for leaf_id, need in leaf_demand.items():
+        leaf = db.query(Product).filter(Product.id == leaf_id).first()
+        leaf.stock = int(leaf.stock or 0) - need
 
     db.commit()
     db.refresh(sale)
