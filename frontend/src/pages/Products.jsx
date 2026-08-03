@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { productsAPI } from '../services/api';
 import { SarIcon } from '../components/SarIcon';
 import toast from 'react-hot-toast';
@@ -19,6 +19,7 @@ export default function Products() {
   const [editingProduct, setEditingProduct] = useState(null);
   const [categoryName, setCategoryName] = useState('');
   const [editingCategory, setEditingCategory] = useState(null);
+  const submittingRef = useRef(false);  // prevents duplicate submits
 
   const [form, setForm] = useState({
     name: '',
@@ -56,6 +57,8 @@ export default function Products() {
       toast.error('الرجاء إدخال اسم المنتج والسعر');
       return;
     }
+    if (submittingRef.current) return;
+    submittingRef.current = true;
 
     try {
       const data = {
@@ -79,6 +82,8 @@ export default function Products() {
       loadData();
     } catch (err) {
       toast.error(err.response?.data?.detail || 'خطأ في حفظ المنتج');
+    } finally {
+      submittingRef.current = false;
     }
   };
 
@@ -126,6 +131,8 @@ export default function Products() {
 
   const handleCategorySubmit = async () => {
     if (!categoryName.trim()) return;
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     try {
       if (editingCategory) {
         await productsAPI.updateCategory(editingCategory.id, { name: categoryName });
@@ -140,6 +147,8 @@ export default function Products() {
       loadData();
     } catch (err) {
       toast.error('خطأ في حفظ التصنيف');
+    } finally {
+      submittingRef.current = false;
     }
   };
 

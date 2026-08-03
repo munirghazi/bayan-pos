@@ -88,6 +88,7 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     full_name = Column(String(100), nullable=False)
     role = Column(String(20), nullable=False, default="cashier")  # admin / manager / cashier
+    location_id = Column(Integer, ForeignKey("locations.id"), nullable=True)  # current branch
     is_active = Column(Boolean, default=True)
     must_change_password = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -129,6 +130,7 @@ class Sale(Base):
     id = Column(Integer, primary_key=True, index=True)
     tenant_id = _tenant_col()
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    register_id = Column(Integer, ForeignKey("registers.id"), nullable=True)  # where the sale happened
     total = Column(Float, nullable=False)
     payment_method = Column(String(20), nullable=False)
     card_ref = Column(String(100), nullable=True)
@@ -193,7 +195,53 @@ class KitComponent(Base):
 TENANT_SCOPED_TABLES = [
     "tenant_settings", "users", "categories", "products",
     "sales", "sale_items", "donations", "kit_components",
+    "locations", "registers",
 ]
+
+
+class Location(Base):
+    """A branch/site of a tenant."""
+    __tablename__ = "locations"
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = _tenant_col()
+    name = Column(String(150), nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    registers = relationship("Register", back_populates="location",
+                             cascade="all, delete-orphan")
+
+
+class Register(Base):
+    """A point-of-sale register/till that belongs to a location."""
+    __tablename__ = "registers"
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = _tenant_col()
+    location_id = Column(Integer, ForeignKey("locations.id", ondelete="CASCADE"),
+                         nullable=False, index=True)
+    name = Column(String(150), nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    location = relationship("Location", back_populates="registers")
+
+
+def ensure_default_branch(db, tenant_id: int):
+    """Create a default branch + register for a tenant if it has none.
+
+    Idempotent. Assumes the caller may not have pinned the tenant, so it pins
+    it here (RLS) before inserting.
+    """
+    db.execute(text("SELECT set_config('app.current_tenant', :t, false)"),
+               {"t": str(int(tenant_id))})
+    loc = db.query(Location).first()
+    if loc is None:
+        loc = Location(tenant_id=tenant_id, name="الفرع الرئيسي")
+        db.add(loc)
+        db.flush()
+    if db.query(Register).filter(Register.location_id == loc.id).first() is None:
+        db.add(Register(tenant_id=tenant_id, location_id=loc.id, name="الصندوق 1"))
+    db.commit()
 
 
 def get_db(request: Request):

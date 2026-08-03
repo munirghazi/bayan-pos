@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { authAPI, settingsAPI } from '../services/api';
+import { authAPI, settingsAPI, locationsAPI } from '../services/api';
 import { getZATCASettings, saveZATCASettings } from '../utils/zatca';
 import { getPOSSettings, savePOSSettings } from '../utils/posSettings';
 import toast from 'react-hot-toast';
@@ -22,6 +22,7 @@ import {
 
 export default function Settings() {
   const [users, setUsers] = useState([]);
+  const [locations, setLocations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
@@ -32,6 +33,7 @@ export default function Settings() {
     password: '',
     full_name: '',
     role: 'cashier',
+    location_id: '',
   });
 
   // Company profile & ZATCA settings combined
@@ -41,13 +43,22 @@ export default function Settings() {
   const [posSettings, setPosSettings] = useState(getPOSSettings());
   const [logoPreview, setLogoPreview] = useState('');
   const logoInputRef = useRef(null);
+  const submittingRef = useRef(false);  // prevents duplicate submits
 
   const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
 
   useEffect(() => {
     loadUsers();
     loadLogo();
+    loadLocations();
   }, []);
+
+  const loadLocations = async () => {
+    try {
+      const res = await locationsAPI.getAll();
+      setLocations(res.data);
+    } catch (err) {}
+  };
 
   const loadLogo = async () => {
     try {
@@ -93,36 +104,33 @@ export default function Settings() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-
-    if (editingUser) {
-      try {
-        const data = {
-          full_name: form.full_name,
-          role: form.role,
-        };
-        if (form.password) {
-          data.password = form.password;
-        }
+    if (!editingUser && (!form.username || !form.password || !form.full_name)) {
+      toast.error('الرجاء تعبئة جميع الحقول المطلوبة');
+      return;
+    }
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    const locId = form.location_id ? parseInt(form.location_id) : null;
+    try {
+      if (editingUser) {
+        const data = { full_name: form.full_name, role: form.role };
+        if (form.password) data.password = form.password;
+        if (locId !== null) data.location_id = locId;
         await authAPI.updateUser(editingUser.id, data);
         toast.success('تم تحديث المستخدم');
-        resetForm();
-        loadUsers();
-      } catch (err) {
-        toast.error(err.response?.data?.detail || 'خطأ في التحديث');
-      }
-    } else {
-      if (!form.username || !form.password || !form.full_name) {
-        toast.error('الرجاء تعبئة جميع الحقول المطلوبة');
-        return;
-      }
-      try {
-        await authAPI.createUser(form);
+      } else {
+        await authAPI.createUser({
+          username: form.username, password: form.password,
+          full_name: form.full_name, role: form.role, location_id: locId,
+        });
         toast.success('تم إضافة المستخدم');
-        resetForm();
-        loadUsers();
-      } catch (err) {
-        toast.error(err.response?.data?.detail || 'خطأ في الإضافة');
       }
+      resetForm();
+      loadUsers();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || (editingUser ? 'خطأ في التحديث' : 'خطأ في الإضافة'));
+    } finally {
+      submittingRef.current = false;
     }
   };
 
@@ -154,12 +162,13 @@ export default function Settings() {
       password: '',
       full_name: user.full_name,
       role: user.role,
+      location_id: user.location_id ? String(user.location_id) : '',
     });
     setShowForm(true);
   };
 
   const resetForm = () => {
-    setForm({ username: '', password: '', full_name: '', role: 'cashier' });
+    setForm({ username: '', password: '', full_name: '', role: 'cashier', location_id: '' });
     setEditingUser(null);
     setShowForm(false);
   };
@@ -611,6 +620,21 @@ export default function Settings() {
                   <option value="cashier">كاشير (متطوع)</option>
                   <option value="admin">مدير</option>
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">الفرع</label>
+                <select
+                  value={form.location_id}
+                  onChange={(e) => setForm({ ...form, location_id: e.target.value })}
+                  className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none"
+                >
+                  <option value="">— كل الفروع (مدير) —</option>
+                  {locations.map((loc) => (
+                    <option key={loc.id} value={loc.id}>{loc.name}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-400 mt-1">الكاشير المُعيّن لفرع يبيع في صناديق فرعه فقط</p>
               </div>
 
               <div className="flex gap-3 pt-2">

@@ -7,6 +7,7 @@ import {
   HiOutlineHeart,
   HiOutlineChartBar,
   HiOutlineCog,
+  HiOutlineOfficeBuilding,
   HiOutlineLogout,
 } from 'react-icons/hi';
 
@@ -16,6 +17,7 @@ const menuItems = [
   { path: '/products', icon: HiOutlineCube, label: 'المنتجات' },
   { path: '/donations', icon: HiOutlineHeart, label: 'التبرعات' },
   { path: '/reports', icon: HiOutlineChartBar, label: 'التقارير' },
+  { path: '/branches', icon: HiOutlineOfficeBuilding, label: 'الفروع والصناديق' },
   { path: '/settings', icon: HiOutlineCog, label: 'الإعدادات' },
 ];
 
@@ -23,16 +25,19 @@ export default function Sidebar() {
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem('user') || '{}');
   const posSettings = getPOSSettings();
+  const tenantName = localStorage.getItem('tenant_name') || 'نظام نقاط البيع';
 
   const handleLogout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    localStorage.removeItem('tenant_name');
+    localStorage.removeItem('tenant_slug');
     navigate('/login');
   };
 
   let filteredMenu = user.role === 'admin'
     ? menuItems
-    : menuItems.filter(item => !['/settings'].includes(item.path));
+    : menuItems.filter(item => !['/settings', '/branches'].includes(item.path));
 
   if (!posSettings.showDonation) {
     filteredMenu = filteredMenu.filter(item => item.path !== '/donations');
@@ -49,7 +54,7 @@ export default function Sidebar() {
             className="h-14 mx-auto mb-2 object-contain"
           />
         ) : null}
-        <h1 className="text-xl font-bold text-white">جمعية بيان</h1>
+        <h1 className="text-xl font-bold text-white">{tenantName}</h1>
         <p className="text-emerald-300 text-sm mt-1">نظام نقاط البيع</p>
       </div>
 

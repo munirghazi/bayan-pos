@@ -96,4 +96,19 @@ export const settingsAPI = {
   getLogo: () => api.get('/settings/logo'),
 };
 
+// ===================== Locations & Registers =====================
+export const locationsAPI = {
+  getAll: () => api.get('/locations/'),
+  create: (data) => api.post('/locations/', data),
+  update: (id, data) => api.put(`/locations/${id}`, data),
+  delete: (id) => api.delete(`/locations/${id}`),
+};
+
+export const registersAPI = {
+  getAll: (locationId) => api.get('/registers/' + (locationId ? `?location_id=${locationId}` : '')),
+  create: (data) => api.post('/registers/', data),
+  update: (id, data) => api.put(`/registers/${id}`, data),
+  delete: (id) => api.delete(`/registers/${id}`),
+};
+
 export default api;

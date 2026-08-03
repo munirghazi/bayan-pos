@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from database import get_db, Sale, SaleItem, Product
+from database import get_db, Sale, SaleItem, Product, Register
 from routers.auth import get_current_user, User
 from kits import explode_to_leaves
 from datetime import datetime
@@ -20,6 +20,7 @@ class SaleCreate(BaseModel):
     items: list[SaleItemCreate]
     payment_method: str  # cash / card / transfer
     card_ref: str | None = None
+    register_id: int | None = None
 
 
 class SaleItemResponse(BaseModel):
@@ -41,6 +42,7 @@ class SaleResponse(BaseModel):
     total: float
     payment_method: str
     card_ref: str | None = None
+    register_id: int | None = None
     items: list[SaleItemResponse]
     created_at: datetime
 
@@ -54,6 +56,14 @@ class SaleResponse(BaseModel):
 def create_sale(request: SaleCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     if not request.items:
         raise HTTPException(status_code=400, detail="يجب إضافة منتج واحد على الأقل")
+
+    if request.register_id is not None:
+        reg = db.query(Register).filter(Register.id == request.register_id).first()
+        if not reg:
+            raise HTTPException(status_code=400, detail="الصندوق غير موجود")
+        # A branch-assigned user may only sell on a register in their own branch.
+        if current_user.location_id is not None and reg.location_id != current_user.location_id:
+            raise HTTPException(status_code=403, detail="لا يمكنك البيع على صندوق خارج فرعك")
 
     total = 0.0
     sale_items = []
@@ -89,6 +99,7 @@ def create_sale(request: SaleCreate, db: Session = Depends(get_db), current_user
     # Create sale
     sale = Sale(
         user_id=current_user.id,
+        register_id=request.register_id,
         total=round(total, 2),
         payment_method=request.payment_method,
         card_ref=request.card_ref,
@@ -144,6 +155,7 @@ def _format_sale(sale: Sale) -> dict:
         "total": sale.total,
         "payment_method": sale.payment_method,
         "card_ref": sale.card_ref,
+        "register_id": sale.register_id,
         "created_at": sale.created_at,
         "items": [
             {

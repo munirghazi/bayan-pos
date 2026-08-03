@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { productsAPI, salesAPI, donationsAPI } from '../services/api';
+import { productsAPI, salesAPI, donationsAPI, registersAPI } from '../services/api';
 import Receipt from '../components/Receipt';
 import { SarIcon } from '../components/SarIcon';
 import { printReceipt } from '../utils/printReceipt';
@@ -51,6 +51,9 @@ export default function POS() {
   const [lastDonation, setLastDonation] = useState(null);
   const [showShareMenu, setShowShareMenu] = useState(false);
   const receiptRef = useRef(null);
+  const checkoutRef = useRef(false);
+  const [registers, setRegisters] = useState([]);
+  const [registerId, setRegisterId] = useState(() => localStorage.getItem('pos_register_id') || '');
 
   const posSettings = getPOSSettings();
 
@@ -61,7 +64,24 @@ export default function POS() {
 
   useEffect(() => {
     loadProducts();
+    loadRegisters();
   }, []);
+
+  const loadRegisters = async () => {
+    try {
+      const res = await registersAPI.getAll();
+      let regs = res.data;
+      const u = JSON.parse(localStorage.getItem('user') || '{}');
+      if (u.location_id) regs = regs.filter((r) => r.location_id === u.location_id);
+      setRegisters(regs);
+      setRegisterId((prev) => {
+        if (prev && regs.some((r) => String(r.id) === String(prev))) return prev;
+        const first = regs.length ? String(regs[0].id) : '';
+        if (first) localStorage.setItem('pos_register_id', first);
+        return first;
+      });
+    } catch (err) {}
+  };
 
   useEffect(() => {
     if (!posSettings.paymentMethods[paymentMethod]) {
@@ -142,6 +162,12 @@ export default function POS() {
       toast.error('الرجاء إدخال رمز العملية');
       return;
     }
+    if (registers.length > 0 && !registerId) {
+      toast.error('الرجاء اختيار الصندوق');
+      return;
+    }
+    if (checkoutRef.current) return;
+    checkoutRef.current = true;
 
     setLoading(true);
     try {
@@ -152,6 +178,7 @@ export default function POS() {
         })),
         payment_method: paymentMethod,
         card_ref: paymentMethod === 'card' ? cardRef.trim() : null,
+        register_id: registerId ? parseInt(registerId) : null,
       });
 
       setLastSale(res.data);
@@ -166,6 +193,7 @@ export default function POS() {
       toast.error(err.response?.data?.detail || 'خطأ في عملية البيع');
     } finally {
       setLoading(false);
+      checkoutRef.current = false;
     }
   };
 
@@ -369,6 +397,24 @@ export default function POS() {
 
         {/* Checkout Area */}
         <div className="border-t p-4 space-y-3">
+          {/* Register picker */}
+          {registers.length > 0 && (
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-gray-600 whitespace-nowrap">الصندوق</label>
+              <select
+                value={registerId}
+                onChange={(e) => { setRegisterId(e.target.value); localStorage.setItem('pos_register_id', e.target.value); }}
+                className="flex-1 px-3 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none text-sm"
+              >
+                {registers.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.location_name ? `${r.location_name} — ${r.name}` : r.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {/* Total */}
           <div className="flex justify-between items-center text-xl font-bold">
             <span className="text-gray-700">الإجمالي</span>

@@ -4,6 +4,7 @@ import { authAPI, settingsAPI } from '../services/api';
 import toast from 'react-hot-toast';
 
 export default function Login() {
+  const [tenant, setTenant] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -18,16 +19,18 @@ export default function Login() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!username || !password) {
-      toast.error('الرجاء إدخال اسم المستخدم وكلمة المرور');
+    if (!tenant || !username || !password) {
+      toast.error('الرجاء إدخال الجهة واسم المستخدم وكلمة المرور');
       return;
     }
 
     setLoading(true);
     try {
-      const res = await authAPI.login(username, password);
+      const res = await authAPI.login(username, password, tenant.trim());
       localStorage.setItem('token', res.data.access_token);
       localStorage.setItem('user', JSON.stringify(res.data.user));
+      localStorage.setItem('tenant_name', res.data.tenant_name || '');
+      localStorage.setItem('tenant_slug', res.data.tenant_slug || '');
       toast.success(`مرحباً ${res.data.user.full_name}`);
       navigate('/');
     } catch (err) {
@@ -53,12 +56,27 @@ export default function Login() {
               <span className="text-3xl text-white font-bold">بيان</span>
             </div>
           )}
-          <h1 className="text-2xl font-bold text-gray-800">جمعية بيان بمكة المكرمة</h1>
-          <p className="text-gray-500 mt-2">نظام نقاط البيع</p>
+          <h1 className="text-2xl font-bold text-gray-800">نظام نقاط البيع</h1>
+          <p className="text-gray-500 mt-2">تسجيل دخول الجهة</p>
         </div>
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-5">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              الجهة
+            </label>
+            <input
+              type="text"
+              value={tenant}
+              onChange={(e) => setTenant(e.target.value)}
+              className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green focus:border-transparent outline-none transition-all text-right"
+              placeholder="معرّف الجهة (مثال: bayan)"
+              autoFocus
+              dir="ltr"
+            />
+          </div>
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               اسم المستخدم
@@ -69,7 +87,6 @@ export default function Login() {
               onChange={(e) => setUsername(e.target.value)}
               className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green focus:border-transparent outline-none transition-all text-right"
               placeholder="أدخل اسم المستخدم"
-              autoFocus
             />
           </div>
 
@@ -98,7 +115,7 @@ export default function Login() {
         {/* Footer */}
         <div className="mt-8 text-center">
           <p className="text-xs text-gray-400">
-            www.bayanmakkah.org.sa
+            نظام نقاط البيع متعدد الجهات
           </p>
         </div>
       </div>

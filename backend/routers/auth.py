@@ -9,7 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from config import settings
-from database import get_db, User, Tenant
+from database import get_db, User, Tenant, Location
 from tenancy import get_secret_key
 
 router = APIRouter()
@@ -32,6 +32,7 @@ class UserCreate(BaseModel):
     password: str
     full_name: str
     role: str = "cashier"
+    location_id: int | None = None
 
 
 class UserResponse(BaseModel):
@@ -41,6 +42,7 @@ class UserResponse(BaseModel):
     role: str
     is_active: bool
     must_change_password: bool = False
+    location_id: int | None = None
 
     class Config:
         from_attributes = True
@@ -50,6 +52,8 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str
     user: UserResponse
+    tenant_slug: str | None = None
+    tenant_name: str | None = None
 
 
 class UserUpdate(BaseModel):
@@ -57,6 +61,14 @@ class UserUpdate(BaseModel):
     role: str | None = None
     is_active: bool | None = None
     password: str | None = None
+    location_id: int | None = None
+
+
+def _validate_location(db, location_id):
+    if location_id is None:
+        return
+    if not db.query(Location).filter(Location.id == location_id).first():
+        raise HTTPException(status_code=400, detail="الفرع غير موجود")
 
 
 # ===================== Helpers =====================
@@ -114,16 +126,15 @@ def _set_auth_cookie(response: Response, token: str) -> None:
 
 @router.post("/login", response_model=TokenResponse)
 def login(request: LoginRequest, response: Response, db: Session = Depends(get_db)):
-    # Resolve tenant (tenants table is not RLS-protected).
-    tenant_q = db.query(Tenant).filter(Tenant.is_active == True)  # noqa: E712
-    if request.tenant:
-        tenant = tenant_q.filter(Tenant.slug == request.tenant).first()
-    else:
-        tenants = tenant_q.limit(2).all()
-        tenant = tenants[0] if len(tenants) == 1 else None
-    if tenant is None:
+    # A tenant must always be specified (multi-organization; no auto-pick).
+    if not request.tenant:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail="يجب تحديد الجهة (tenant)")
+    tenant = db.query(Tenant).filter(
+        Tenant.slug == request.tenant, Tenant.is_active == True).first()  # noqa: E712
+    if tenant is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="الجهة غير موجودة أو غير مفعّلة")
 
     # Pin this connection to the tenant so the user lookup is RLS-scoped.
     _pin_session_tenant(db, tenant.id)
@@ -138,7 +149,8 @@ def login(request: LoginRequest, response: Response, db: Session = Depends(get_d
     token = create_access_token(username=user.username, tenant_id=tenant.id)
     _set_auth_cookie(response, token)
     return TokenResponse(access_token=token, token_type="bearer",
-                         user=UserResponse.model_validate(user))
+                         user=UserResponse.model_validate(user),
+                         tenant_slug=tenant.slug, tenant_name=tenant.name)
 
 
 @router.post("/logout")
@@ -163,11 +175,13 @@ def create_user(request: UserCreate, db: Session = Depends(get_db),
     existing = db.query(User).filter(User.username == request.username).first()
     if existing:
         raise HTTPException(status_code=400, detail="اسم المستخدم موجود مسبقاً")
+    _validate_location(db, request.location_id)
     user = User(
         username=request.username,
         password_hash=pwd_context.hash(request.password),
         full_name=request.full_name,
         role=request.role,
+        location_id=request.location_id,
     )  # tenant_id filled by DB default from app.current_tenant
     db.add(user)
     db.commit()
@@ -190,6 +204,9 @@ def update_user(user_id: int, request: UserUpdate, db: Session = Depends(get_db)
     if request.password is not None:
         user.password_hash = pwd_context.hash(request.password)
         user.must_change_password = False
+    if request.location_id is not None:
+        _validate_location(db, request.location_id)
+        user.location_id = request.location_id
     db.commit()
     db.refresh(user)
     return user
