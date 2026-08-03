@@ -26,12 +26,14 @@ export default function Sidebar() {
   const user = JSON.parse(localStorage.getItem('user') || '{}');
   const posSettings = getPOSSettings();
   const tenantName = localStorage.getItem('tenant_name') || 'نظام نقاط البيع';
+  const tenantLogo = localStorage.getItem('tenant_logo') || '';
 
   const handleLogout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     localStorage.removeItem('tenant_name');
     localStorage.removeItem('tenant_slug');
+    localStorage.removeItem('tenant_logo');
     navigate('/login');
   };
 
@@ -47,11 +49,11 @@ export default function Sidebar() {
     <aside className="w-64 bg-bayan-dark min-h-screen flex flex-col shadow-xl">
       {/* Logo / Header */}
       <div className="p-6 border-b border-bayan-green/30 text-center">
-        {posSettings.logoUrl ? (
+        {tenantLogo ? (
           <img
-            src={posSettings.logoUrl}
+            src={tenantLogo}
             alt="شعار الجمعية"
-            className="h-14 mx-auto mb-2 object-contain"
+            className="h-14 mx-auto mb-2 object-contain bg-white rounded-lg p-1"
           />
         ) : null}
         <h1 className="text-xl font-bold text-white">{tenantName}</h1>

@@ -86,6 +86,8 @@ export const reportsAPI = {
 
 // ===================== Settings =====================
 export const settingsAPI = {
+  getTenant: () => api.get('/settings/tenant'),
+  updateTenant: (data) => api.put('/settings/tenant', data),
   uploadLogo: (file) => {
     const formData = new FormData();
     formData.append('file', file);

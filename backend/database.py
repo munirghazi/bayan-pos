@@ -69,6 +69,10 @@ class TenantSettings(Base):
     vat_number = Column(String(20), nullable=True)
     national_address = Column(String(300), nullable=True)
     vat_rate = Column(Float, default=15.0, nullable=False)
+    city = Column(String(100), nullable=True)
+    country = Column(String(100), nullable=True)
+    website = Column(String(200), nullable=True)
+    logo_url = Column(String(500), nullable=True)
     inventory_mode = Column(String(20), default="per_branch", nullable=False)  # shared_pool | per_branch
     fatoora_enabled_default = Column(Boolean, default=False, nullable=False)
     payment_methods = Column(String(200), default="cash,card,transfer", nullable=False)

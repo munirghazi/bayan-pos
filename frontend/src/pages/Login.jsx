@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { authAPI, settingsAPI } from '../services/api';
+import { saveZATCASettings } from '../utils/zatca';
 import toast from 'react-hot-toast';
 
 export default function Login() {
@@ -31,6 +32,12 @@ export default function Login() {
       localStorage.setItem('user', JSON.stringify(res.data.user));
       localStorage.setItem('tenant_name', res.data.tenant_name || '');
       localStorage.setItem('tenant_slug', res.data.tenant_slug || '');
+      try {
+        const st = await settingsAPI.getTenant();
+        const d = st.data;
+        saveZATCASettings({ sellerName: d.seller_name || '', vatNumber: d.vat_number || '', vatRate: (d.vat_rate ?? 15) / 100 });
+        localStorage.setItem('tenant_logo', d.logo_url || '');
+      } catch (e) {}
       toast.success(`مرحباً ${res.data.user.full_name}`);
       navigate('/');
     } catch (err) {

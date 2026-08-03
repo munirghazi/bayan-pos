@@ -37,7 +37,10 @@ export default function Settings() {
   });
 
   // Company profile & ZATCA settings combined
-  const [profileForm, setProfileForm] = useState(getZATCASettings());
+  const [profileForm, setProfileForm] = useState({
+    sellerName: '', vatNumber: '', vatRate: 0.15, website: '', city: '', country: '',
+  });
+  const savingProfileRef = useRef(false);
 
   // POS settings
   const [posSettings, setPosSettings] = useState(getPOSSettings());
@@ -51,7 +54,26 @@ export default function Settings() {
     loadUsers();
     loadLogo();
     loadLocations();
+    loadTenantSettings();
   }, []);
+
+  const loadTenantSettings = async () => {
+    try {
+      const { data } = await settingsAPI.getTenant();
+      const form = {
+        sellerName: data.seller_name || '',
+        vatNumber: data.vat_number || '',
+        vatRate: (data.vat_rate ?? 15) / 100,
+        website: data.website || '',
+        city: data.city || '',
+        country: data.country || '',
+      };
+      setProfileForm(form);
+      // keep the receipt/ZATCA-QR cache in sync with THIS tenant
+      saveZATCASettings({ sellerName: form.sellerName, vatNumber: form.vatNumber, vatRate: form.vatRate });
+      localStorage.setItem('tenant_logo', data.logo_url || '');
+    } catch (err) {}
+  };
 
   const loadLocations = async () => {
     try {
@@ -77,6 +99,7 @@ export default function Settings() {
       const res = await settingsAPI.uploadLogo(file);
       const url = res.data.url;
       setLogoPreview(url);
+      localStorage.setItem('tenant_logo', url);
       const updated = { ...posSettings, logoUrl: url };
       setPosSettings(updated);
       savePOSSettings(updated);
@@ -173,13 +196,29 @@ export default function Settings() {
     setShowForm(false);
   };
 
-  const handleSaveProfile = () => {
+  const handleSaveProfile = async () => {
     if (!profileForm.vatNumber || profileForm.vatNumber.length !== 15) {
       toast.error('الرقم الضريبي يجب أن يكون 15 رقم');
       return;
     }
-    saveZATCASettings(profileForm);
-    toast.success('تم حفظ بيانات الجمعية والإعدادات الضريبية');
+    if (savingProfileRef.current) return;
+    savingProfileRef.current = true;
+    try {
+      await settingsAPI.updateTenant({
+        seller_name: profileForm.sellerName,
+        vat_number: profileForm.vatNumber,
+        vat_rate: Math.round((profileForm.vatRate || 0) * 100),
+        website: profileForm.website,
+        city: profileForm.city,
+        country: profileForm.country,
+      });
+      saveZATCASettings({ sellerName: profileForm.sellerName, vatNumber: profileForm.vatNumber, vatRate: profileForm.vatRate });
+      toast.success('تم حفظ بيانات الجمعية');
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'خطأ في الحفظ');
+    } finally {
+      savingProfileRef.current = false;
+    }
   };
 
   if (loading) {
@@ -310,28 +349,40 @@ export default function Settings() {
                 <p className="text-xs text-gray-400 mt-1">النسبة الحالية في المملكة العربية السعودية 15%</p>
               </div>
 
-              {/* Static info */}
+              {/* Website */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">الموقع الإلكتروني</label>
-                <a
-                  href="https://www.bayanmakkah.org.sa/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block px-4 py-3 rounded-lg border border-gray-200 bg-gray-50 text-bayan-green hover:underline"
-                >
-                  www.bayanmakkah.org.sa
-                </a>
+                <input
+                  type="text"
+                  value={profileForm.website}
+                  onChange={(e) => setProfileForm({ ...profileForm, website: e.target.value })}
+                  className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none"
+                  placeholder="https://example.org.sa"
+                  dir="ltr"
+                />
               </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">المدينة</label>
-                <p className="px-4 py-3 rounded-lg border border-gray-200 bg-gray-50 text-gray-800">مكة المكرمة</p>
+                <input
+                  type="text"
+                  value={profileForm.city}
+                  onChange={(e) => setProfileForm({ ...profileForm, city: e.target.value })}
+                  className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none"
+                  placeholder="المدينة"
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">الدولة</label>
-                <p className="px-4 py-3 rounded-lg border border-gray-200 bg-gray-50 text-gray-800">المملكة العربية السعودية</p>
+                <input
+                  type="text"
+                  value={profileForm.country}
+                  onChange={(e) => setProfileForm({ ...profileForm, country: e.target.value })}
+                  className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none"
+                  placeholder="الدولة"
+                />
               </div>
             </div>
 
