@@ -135,6 +135,7 @@ class Sale(Base):
     tenant_id = _tenant_col()
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     register_id = Column(Integer, ForeignKey("registers.id"), nullable=True)  # where the sale happened
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=True)  # optional buyer
     total = Column(Float, nullable=False)
     payment_method = Column(String(20), nullable=False)
     card_ref = Column(String(100), nullable=True)
@@ -142,6 +143,7 @@ class Sale(Base):
 
     user = relationship("User", back_populates="sales")
     items = relationship("SaleItem", back_populates="sale", cascade="all, delete-orphan")
+    customer = relationship("Customer")
 
 
 class SaleItem(Base):
@@ -199,8 +201,27 @@ class KitComponent(Base):
 TENANT_SCOPED_TABLES = [
     "tenant_settings", "users", "categories", "products",
     "sales", "sale_items", "donations", "kit_components",
-    "locations", "registers",
+    "locations", "registers", "customers",
 ]
+
+
+class Customer(Base):
+    """A buyer, captured at the POS. Optional on a sale (walk-ins have none).
+
+    vat_number + address support ZATCA standard (B2B) invoices later; simplified
+    (B2C) receipts need only a name/phone.
+    """
+    __tablename__ = "customers"
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = _tenant_col()
+    name = Column(String(200), nullable=False)
+    phone = Column(String(30), nullable=True, index=True)
+    email = Column(String(200), nullable=True)
+    vat_number = Column(String(20), nullable=True)
+    address = Column(String(300), nullable=True)
+    city = Column(String(100), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class Location(Base):

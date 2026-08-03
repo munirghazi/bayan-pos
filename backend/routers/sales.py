@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from database import get_db, Sale, SaleItem, Product, Register
+from database import get_db, Sale, SaleItem, Product, Register, Customer
 from routers.auth import get_current_user, User
 from kits import explode_to_leaves
 from datetime import datetime
@@ -21,6 +21,7 @@ class SaleCreate(BaseModel):
     payment_method: str  # cash / card / transfer
     card_ref: str | None = None
     register_id: int | None = None
+    customer_id: int | None = None
 
 
 class SaleItemResponse(BaseModel):
@@ -43,6 +44,8 @@ class SaleResponse(BaseModel):
     payment_method: str
     card_ref: str | None = None
     register_id: int | None = None
+    customer_id: int | None = None
+    customer_name: str | None = None
     items: list[SaleItemResponse]
     created_at: datetime
 
@@ -64,6 +67,10 @@ def create_sale(request: SaleCreate, db: Session = Depends(get_db), current_user
         # A branch-assigned user may only sell on a register in their own branch.
         if current_user.location_id is not None and reg.location_id != current_user.location_id:
             raise HTTPException(status_code=403, detail="لا يمكنك البيع على صندوق خارج فرعك")
+
+    if request.customer_id is not None:
+        if not db.query(Customer).filter(Customer.id == request.customer_id).first():
+            raise HTTPException(status_code=400, detail="العميل غير موجود")
 
     total = 0.0
     sale_items = []
@@ -100,6 +107,7 @@ def create_sale(request: SaleCreate, db: Session = Depends(get_db), current_user
     sale = Sale(
         user_id=current_user.id,
         register_id=request.register_id,
+        customer_id=request.customer_id,
         total=round(total, 2),
         payment_method=request.payment_method,
         card_ref=request.card_ref,
@@ -156,6 +164,8 @@ def _format_sale(sale: Sale) -> dict:
         "payment_method": sale.payment_method,
         "card_ref": sale.card_ref,
         "register_id": sale.register_id,
+        "customer_id": sale.customer_id,
+        "customer_name": sale.customer.name if getattr(sale, "customer", None) else None,
         "created_at": sale.created_at,
         "items": [
             {
