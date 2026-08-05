@@ -1,5 +1,6 @@
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
+import QRCode from 'qrcode';
 
 /**
  * Generate a PDF from a DOM element (receipt)
@@ -14,6 +15,23 @@ export async function generatePDFBlob(element, filename = 'invoice') {
     useCORS: true,
     backgroundColor: '#ffffff',
     logging: false,
+    // html2canvas rasterizes live <canvas> (e.g. the ZATCA QR) as blank.
+    // Replace each cloned canvas with an <img> of the original's pixels.
+    onclone: (clonedDoc) => {
+      const origCanvases = element.querySelectorAll('canvas');
+      const cloneCanvases = clonedDoc.querySelectorAll('canvas');
+      cloneCanvases.forEach((cloneCanvas, i) => {
+        const orig = origCanvases[i];
+        if (!orig) return;
+        try {
+          const img = clonedDoc.createElement('img');
+          img.src = orig.toDataURL('image/png');
+          img.setAttribute('width', orig.width);
+          img.setAttribute('height', orig.height);
+          if (cloneCanvas.parentNode) cloneCanvas.parentNode.replaceChild(img, cloneCanvas);
+        } catch (e) { /* ignore */ }
+      });
+    },
   });
 
   const imgData = canvas.toDataURL('image/png');
@@ -31,6 +49,23 @@ export async function generatePDFBlob(element, filename = 'invoice') {
   });
 
   pdf.addImage(imgData, 'PNG', 0, 5, pdfWidth, pdfHeight);
+
+  // Stamp the ZATCA QR directly into the PDF at its on-screen position.
+  // html2canvas is unreliable for the QR, so we draw it with jsPDF instead.
+  try {
+    const slot = element.querySelector('[data-qr-slot]');
+    const qrValue = slot && slot.getAttribute('data-qr');
+    if (slot && qrValue) {
+      const qrUrl = await QRCode.toDataURL(qrValue, { margin: 1, width: 512 });
+      const elRect = element.getBoundingClientRect();
+      const r = slot.getBoundingClientRect();
+      const scale = pdfWidth / elRect.width;           // mm per px
+      const size = r.width * scale;
+      const x = (r.left - elRect.left) * scale;
+      const y = 5 + (r.top - elRect.top) * scale;
+      pdf.addImage(qrUrl, 'PNG', x, y, size, size);
+    }
+  } catch (e) { /* QR overlay is best-effort */ }
 
   return pdf.output('blob');
 }

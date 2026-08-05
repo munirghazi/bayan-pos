@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { authAPI, settingsAPI, locationsAPI } from '../services/api';
+import { authAPI, settingsAPI, locationsAPI, apiError } from '../services/api';
 import { getZATCASettings, saveZATCASettings } from '../utils/zatca';
 import { getPOSSettings, savePOSSettings } from '../utils/posSettings';
 import toast from 'react-hot-toast';
@@ -151,7 +151,7 @@ export default function Settings() {
       resetForm();
       loadUsers();
     } catch (err) {
-      toast.error(err.response?.data?.detail || (editingUser ? 'خطأ في التحديث' : 'خطأ في الإضافة'));
+      toast.error(apiError(err, editingUser ? 'خطأ في التحديث' : 'خطأ في الإضافة'));
     } finally {
       submittingRef.current = false;
     }

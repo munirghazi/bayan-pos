@@ -270,12 +270,13 @@ def ensure_default_branch(db, tenant_id: int):
 
 
 def get_db(request: Request):
-    """Yield a session whose connection is pinned to the caller's tenant.
+    """Yield a session bound to ONE dedicated connection, pinned to the caller's
+    tenant for the whole request.
 
-    The tenant is read from the request's JWT (cookie or Bearer). Setting the
-    Postgres session variable here (not via middleware) avoids ContextVar/
-    threadpool propagation issues and guarantees RLS is active for every query,
-    including the DEFAULT that fills tenant_id on INSERT.
+    Pinning a single connection (rather than 'a session') is essential: after a
+    commit, SQLAlchemy may otherwise use a different pooled connection for a
+    refresh/lazy-load — one where app.current_tenant isn't set — and RLS would
+    hide the just-written row (InvalidRequestError: Could not refresh instance).
     """
     from tenancy import extract_token, decode_token
     tid = None
@@ -286,19 +287,25 @@ def get_db(request: Request):
         if payload:
             tid = payload.get("tid")
             sub = payload.get("sub")
-    db = SessionLocal()
+
+    connection = engine.connect()
+    connection.execute(text("SELECT set_config('app.current_tenant', :t, false)"),
+                       {"t": "" if tid is None else str(int(tid))})
+    connection.commit()
+
+    db = SessionLocal(bind=connection)
+    request.state.tenant_id = int(tid) if tid is not None else None
+    request.state.username = sub
     try:
-        db.execute(text("SELECT set_config('app.current_tenant', :t, false)"),
-                   {"t": "" if tid is None else str(int(tid))})
-        request.state.tenant_id = int(tid) if tid is not None else None
-        request.state.username = sub
         yield db
     finally:
+        db.close()
         try:
-            db.execute(text("SELECT set_config('app.current_tenant', '', false)"))
+            connection.execute(text("SELECT set_config('app.current_tenant', '', false)"))
+            connection.commit()
         except Exception:
             pass
-        db.close()
+        connection.close()
 
 
 def create_tables():

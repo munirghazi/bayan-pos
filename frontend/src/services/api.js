@@ -113,4 +113,28 @@ export const registersAPI = {
   delete: (id) => api.delete(`/registers/${id}`),
 };
 
+export const customersAPI = {
+  getAll: (q) => api.get('/customers/' + (q ? `?q=${encodeURIComponent(q)}` : '')),
+  get: (id) => api.get(`/customers/${id}`),
+  create: (data) => api.post('/customers/', data),
+  update: (id, data) => api.put(`/customers/${id}`, data),
+  delete: (id) => api.delete(`/customers/${id}`),
+};
+
+// Extracts a human-readable message from an axios error:
+// - string detail (our HTTPException messages)
+// - list detail (FastAPI 422 validation) -> joined field messages
+// - no response (dropped connection / server down) -> clear connectivity message
+export function apiError(err, fallback = 'حدث خطأ') {
+  if (err && err.response) {
+    const d = err.response.data && err.response.data.detail;
+    if (typeof d === 'string' && d) return d;
+    if (Array.isArray(d) && d.length) {
+      return d.map((x) => (x && x.msg) ? x.msg : (typeof x === 'string' ? x : JSON.stringify(x))).join('، ');
+    }
+    return `${fallback} (${err.response.status})`;
+  }
+  return 'تعذّر الاتصال بالخادم، تأكد من تشغيله وأعد المحاولة';
+}
+
 export default api;

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { productsAPI, salesAPI, donationsAPI, registersAPI } from '../services/api';
+import { productsAPI, salesAPI, donationsAPI, registersAPI, customersAPI, apiError } from '../services/api';
 import Receipt from '../components/Receipt';
 import { SarIcon } from '../components/SarIcon';
 import { printReceipt } from '../utils/printReceipt';
@@ -54,6 +54,11 @@ export default function POS() {
   const checkoutRef = useRef(false);
   const [registers, setRegisters] = useState([]);
   const [registerId, setRegisterId] = useState(() => localStorage.getItem('pos_register_id') || '');
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [customerQuery, setCustomerQuery] = useState('');
+  const [customerResults, setCustomerResults] = useState([]);
+  const [showNewCustomer, setShowNewCustomer] = useState(false);
+  const [newCustomer, setNewCustomer] = useState({ name: '', phone: '' });
 
   const posSettings = getPOSSettings();
 
@@ -81,6 +86,18 @@ export default function POS() {
         return first;
       });
     } catch (err) {}
+  };
+
+  const searchCustomers = async (q) => {
+    setCustomerQuery(q);
+    if (!q || q.length < 2) { setCustomerResults([]); return; }
+    try { const res = await customersAPI.getAll(q); setCustomerResults(res.data); } catch (e) {}
+  };
+  const selectCustomer = (c) => { setSelectedCustomer(c); setCustomerQuery(''); setCustomerResults([]); setShowNewCustomer(false); };
+  const createCustomer = async () => {
+    if (!newCustomer.name.trim()) { toast.error('الرجاء إدخال اسم العميل'); return; }
+    try { const res = await customersAPI.create({ name: newCustomer.name.trim(), phone: newCustomer.phone.trim() || null }); selectCustomer(res.data); setNewCustomer({ name: '', phone: '' }); toast.success('تم إضافة العميل'); }
+    catch (err) { toast.error(apiError(err, 'خطأ في إضافة العميل')); }
   };
 
   useEffect(() => {
@@ -179,6 +196,7 @@ export default function POS() {
         payment_method: paymentMethod,
         card_ref: paymentMethod === 'card' ? cardRef.trim() : null,
         register_id: registerId ? parseInt(registerId) : null,
+        customer_id: selectedCustomer ? selectedCustomer.id : null,
       });
 
       setLastSale(res.data);
@@ -187,10 +205,11 @@ export default function POS() {
       setCart([]);
       setCashReceived('');
       setCardRef('');
+      setSelectedCustomer(null);
       loadProducts();
       toast.success('تمت عملية البيع بنجاح');
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'خطأ في عملية البيع');
+      toast.error(apiError(err, 'خطأ في عملية البيع'));
     } finally {
       setLoading(false);
       checkoutRef.current = false;
@@ -397,6 +416,75 @@ export default function POS() {
 
         {/* Checkout Area */}
         <div className="border-t p-4 space-y-3">
+          {/* Customer (optional) */}
+          <div>
+            {selectedCustomer ? (
+              <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+                <div className="text-sm">
+                  <span className="font-medium text-gray-800">{selectedCustomer.name}</span>
+                  {selectedCustomer.phone && <span className="text-gray-500 mr-2">{selectedCustomer.phone}</span>}
+                </div>
+                <button onClick={() => setSelectedCustomer(null)} className="text-red-500 hover:text-red-700 text-xl leading-none">×</button>
+              </div>
+            ) : (
+              <div className="relative">
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={customerQuery}
+                    onChange={(e) => searchCustomers(e.target.value)}
+                    placeholder="العميل (اختياري): بحث بالاسم أو الجوال"
+                    className="flex-1 px-3 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none text-sm text-right"
+                  />
+                  <button
+                    onClick={() => setShowNewCustomer((v) => !v)}
+                    className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-lg text-sm whitespace-nowrap"
+                  >
+                    + جديد
+                  </button>
+                </div>
+                {customerResults.length > 0 && (
+                  <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-40 overflow-auto">
+                    {customerResults.map((c) => (
+                      <button
+                        key={c.id}
+                        onClick={() => selectCustomer(c)}
+                        className="block w-full text-right px-3 py-2 hover:bg-gray-50 text-sm"
+                      >
+                        {c.name}{c.phone ? ` — ${c.phone}` : ''}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {showNewCustomer && (
+                  <div className="mt-2 p-3 rounded-lg border border-gray-200 bg-gray-50 space-y-2">
+                    <input
+                      type="text"
+                      value={newCustomer.name}
+                      onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })}
+                      placeholder="اسم العميل"
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 outline-none text-sm text-right"
+                    />
+                    <input
+                      type="text"
+                      value={newCustomer.phone}
+                      onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })}
+                      placeholder="الجوال (اختياري)"
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 outline-none text-sm text-right"
+                      dir="ltr"
+                    />
+                    <button
+                      onClick={createCustomer}
+                      className="w-full bg-bayan-green hover:bg-bayan-dark text-white px-3 py-2 rounded-lg text-sm"
+                    >
+                      إضافة واختيار
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Register picker */}
           {registers.length > 0 && (
             <div className="flex items-center gap-2">

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { productsAPI } from '../services/api';
+import { productsAPI, apiError } from '../services/api';
 import { SarIcon } from '../components/SarIcon';
 import toast from 'react-hot-toast';
 import {
@@ -81,7 +81,7 @@ export default function Products() {
       resetForm();
       loadData();
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'خطأ في حفظ المنتج');
+      toast.error(apiError(err, 'خطأ في حفظ المنتج'));
     } finally {
       submittingRef.current = false;
     }

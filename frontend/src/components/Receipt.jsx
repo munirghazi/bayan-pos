@@ -1,5 +1,5 @@
-import { forwardRef, useMemo } from 'react';
-import { QRCodeCanvas } from 'qrcode.react';
+import { forwardRef, useMemo, useEffect, useState } from 'react';
+import QRCode from 'qrcode';
 import { SarIcon } from './SarIcon';
 import { generateZATCAQR, getZATCASettings, calculateItemsVAT, calculateVAT } from '../utils/zatca';
 import { getPOSSettings } from '../utils/posSettings';
@@ -48,6 +48,14 @@ const Receipt = forwardRef(({ sale, type = 'sale', donation = null }, ref) => {
     }
     return null;
   }, [sale, donation, type, zatca, vatInfo]);
+
+  const [qrImg, setQrImg] = useState('');
+  useEffect(() => {
+    if (!qrData) { setQrImg(''); return; }
+    QRCode.toDataURL(qrData, { margin: 1, width: 320 })
+      .then(setQrImg)
+      .catch(() => setQrImg(''));
+  }, [qrData]);
 
   return (
     <div ref={ref} className="receipt-content bg-white p-6 max-w-sm mx-auto text-sm" dir="rtl" style={{ fontFamily: 'Cairo, sans-serif' }}>
@@ -147,15 +155,8 @@ const Receipt = forwardRef(({ sale, type = 'sale', donation = null }, ref) => {
           {/* ZATCA QR Code */}
           {qrData && (
             <div className="text-center mt-4 pt-3 border-t border-dashed border-gray-300">
-              <div style={{ display: 'inline-block', background: '#fff', padding: '8px' }}>
-                <QRCodeCanvas
-                  value={qrData}
-                  size={150}
-                  level="L"
-                  includeMargin={true}
-                  bgColor="#ffffff"
-                  fgColor="#000000"
-                />
+              <div data-qr-slot data-qr={qrData} style={{ display: 'inline-block', background: '#fff', padding: '8px' }}>
+                {qrImg && <img src={qrImg} alt="ZATCA QR" width={150} height={150} style={{ display: 'block' }} />}
               </div>
               <p className="text-xs text-gray-400 mt-1">رمز الفاتورة الضريبية (ZATCA)</p>
             </div>
@@ -208,15 +209,8 @@ const Receipt = forwardRef(({ sale, type = 'sale', donation = null }, ref) => {
           {/* QR Code for donation */}
           {qrData && (
             <div className="text-center mt-4 pt-3 border-t border-dashed border-gray-300">
-              <div style={{ display: 'inline-block', background: '#fff', padding: '8px' }}>
-                <QRCodeCanvas
-                  value={qrData}
-                  size={120}
-                  level="L"
-                  includeMargin={true}
-                  bgColor="#ffffff"
-                  fgColor="#000000"
-                />
+              <div data-qr-slot data-qr={qrData} style={{ display: 'inline-block', background: '#fff', padding: '8px' }}>
+                {qrImg && <img src={qrImg} alt="ZATCA QR" width={120} height={120} style={{ display: 'block' }} />}
               </div>
             </div>
           )}
