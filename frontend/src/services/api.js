@@ -131,6 +131,18 @@ export const customersAPI = {
 // - string detail (our HTTPException messages)
 // - list detail (FastAPI 422 validation) -> joined field messages
 // - no response (dropped connection / server down) -> clear connectivity message
+export const returnsAPI = {
+  getForSale: (saleId) => api.get(`/returns/sale/${saleId}`),
+  getAll: () => api.get('/returns/'),
+  get: (id) => api.get(`/returns/${id}`),
+  create: (data) => api.post('/returns/', data),
+};
+
+export const deliveryAPI = {
+  status: () => api.get('/delivery/status'),
+  sendEmail: (data) => api.post('/delivery/email', data),
+};
+
 export function apiError(err, fallback = 'حدث خطأ') {
   if (err && err.response) {
     const d = err.response.data && err.response.data.detail;

@@ -16,7 +16,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     create_engine, event, text,
-    Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text,
+    Column, Integer, String, Float, Boolean, DateTime, Date, ForeignKey, Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
@@ -201,8 +201,78 @@ class KitComponent(Base):
 TENANT_SCOPED_TABLES = [
     "tenant_settings", "users", "categories", "products",
     "sales", "sale_items", "donations", "kit_components",
-    "locations", "registers", "customers",
+    "locations", "registers", "customers", "returns", "return_items",
+    "suppliers", "supplier_documents",
 ]
+
+
+class Supplier(Base):
+    """A vendor. Cannot be issued a purchase order unless compliant (see
+    supplier_documents): CR + VAT + National Address, each verified and unexpired.
+    """
+    __tablename__ = "suppliers"
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = _tenant_col()
+    name = Column(String(200), nullable=False)
+    iban = Column(String(34), nullable=True)
+    payment_terms = Column(String(100), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    documents = relationship("SupplierDocument", back_populates="supplier",
+                             cascade="all, delete-orphan")
+
+
+class SupplierDocument(Base):
+    """One compliance document per (supplier, doc_type): cr | vat | national_address."""
+    __tablename__ = "supplier_documents"
+    __table_args__ = (UniqueConstraint("supplier_id", "doc_type",
+                                        name="uq_supplier_doc_type"),)
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = _tenant_col()
+    supplier_id = Column(Integer, ForeignKey("suppliers.id", ondelete="CASCADE"),
+                         nullable=False, index=True)
+    doc_type = Column(String(30), nullable=False)     # cr | vat | national_address
+    number = Column(String(100), nullable=True)
+    issue_date = Column(Date, nullable=True)
+    expiry_date = Column(Date, nullable=True)
+    file_url = Column(String(500), nullable=True)
+    is_verified = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    supplier = relationship("Supplier", back_populates="documents")
+
+
+class Return(Base):
+    """A return / credit note against an existing sale (full or partial)."""
+    __tablename__ = "returns"
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = _tenant_col()
+    sale_id = Column(Integer, ForeignKey("sales.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    register_id = Column(Integer, ForeignKey("registers.id"), nullable=True)
+    credit_note_number = Column(Integer, nullable=False)   # per-tenant sequential
+    total = Column(Float, nullable=False)                  # amount refunded
+    reason = Column(String(300), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    items = relationship("ReturnItem", back_populates="return_ref",
+                         cascade="all, delete-orphan")
+    sale = relationship("Sale")
+
+
+class ReturnItem(Base):
+    __tablename__ = "return_items"
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = _tenant_col()
+    return_id = Column(Integer, ForeignKey("returns.id", ondelete="CASCADE"),
+                       nullable=False, index=True)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
+    quantity = Column(Integer, nullable=False)
+    price = Column(Float, nullable=False)                   # unit price at sale time
+
+    return_ref = relationship("Return", back_populates="items")
+    product = relationship("Product")
 
 
 class Customer(Base):

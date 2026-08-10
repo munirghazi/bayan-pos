@@ -34,6 +34,15 @@ class Settings(BaseSettings):
     bootstrap_admin_username: str = "admin"
     bootstrap_admin_password: str = ""   # if empty, admin is NOT auto-seeded
 
+    # --- Email delivery (SMTP). Email is disabled until smtp_host is set. ---
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_from_name: str = "Bayan POS"
+    smtp_tls: bool = True
+
     @property
     def cors_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

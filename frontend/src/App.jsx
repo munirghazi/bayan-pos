@@ -9,6 +9,7 @@ import Donations from './pages/Donations';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
 import Branches from './pages/Branches';
+import Returns from './pages/Returns';
 
 function ProtectedLayout() {
   const token = localStorage.getItem('token');
@@ -59,6 +60,7 @@ export default function App() {
           <Route path="/donations" element={<Donations />} />
           <Route path="/reports" element={<Reports />} />
           <Route path="/branches" element={<Branches />} />
+          <Route path="/returns" element={<Returns />} />
           <Route path="/settings" element={<Settings />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />

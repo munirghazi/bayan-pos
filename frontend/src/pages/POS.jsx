@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { productsAPI, salesAPI, donationsAPI, registersAPI, customersAPI, apiError } from '../services/api';
 import { COUNTRIES, flagOf, validateLocalPhone } from '../utils/countries';
+import { deliveryAPI } from '../services/api';
 import Receipt from '../components/Receipt';
 import { SarIcon } from '../components/SarIcon';
 import { printReceipt } from '../utils/printReceipt';
-import { downloadPDF, shareViaWhatsApp, shareViaEmail } from '../utils/generatePDF';
+import { downloadPDF, shareViaWhatsApp, pdfToBase64 } from '../utils/generatePDF';
 import { getPOSSettings } from '../utils/posSettings';
 import toast from 'react-hot-toast';
 import {
@@ -300,13 +301,18 @@ export default function POS() {
 
   const handleShareEmail = async () => {
     if (!receiptRef.current) return;
+    const suggested = (selectedCustomer && selectedCustomer.email) || '';
+    const to = window.prompt('البريد الإلكتروني للعميل:', suggested);
+    if (!to) return;
     try {
-      toast.loading('جاري إنشاء PDF...');
-      await shareViaEmail(receiptRef.current, getInvoiceFilename());
+      toast.loading('جاري إرسال الفاتورة...');
+      const pdf_base64 = await pdfToBase64(receiptRef.current, getInvoiceFilename());
+      await deliveryAPI.sendEmail({ to, filename: `${getInvoiceFilename()}.pdf`, pdf_base64, subject: 'فاتورتك' });
       toast.dismiss();
+      toast.success('تم إرسال الفاتورة بالبريد');
     } catch (err) {
       toast.dismiss();
-      toast.error('خطأ في المشاركة');
+      toast.error(apiError(err, 'تعذّر إرسال البريد'));
     }
   };
 

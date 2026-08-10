@@ -75,6 +75,16 @@ export async function generatePDFBlob(element, filename = 'invoice') {
  * @param {HTMLElement} element - The DOM element
  * @param {string} filename - Filename without extension
  */
+export async function pdfToBase64(element, filename = 'invoice') {
+  const blob = await generatePDFBlob(element, filename);
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(String(reader.result).split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
 export async function downloadPDF(element, filename = 'invoice') {
   const blob = await generatePDFBlob(element, filename);
   const url = URL.createObjectURL(blob);
