@@ -12,8 +12,14 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
+      localStorage.removeItem('token');
       localStorage.removeItem('user');
-      window.location.href = '/login';
+      localStorage.removeItem('tenant_name');
+      localStorage.removeItem('tenant_slug');
+      localStorage.removeItem('tenant_logo');
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login';
+      }
     }
     return Promise.reject(error);
   }

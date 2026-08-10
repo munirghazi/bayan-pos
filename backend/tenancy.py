@@ -15,8 +15,20 @@ def get_secret_key() -> str:
     if settings.is_production:
         raise RuntimeError("SECRET_KEY is not set. Refusing to start in production without it.")
     if _DEV_SECRET is None:
+        import os
         import secrets as _s
-        _DEV_SECRET = _s.token_urlsafe(48)
+        # Persist the dev secret so restarting the server doesn't invalidate
+        # everyone's session (which manifests as sudden 401s / a login loop).
+        path = os.path.join(os.path.dirname(__file__), ".dev_secret")
+        try:
+            if os.path.exists(path):
+                _DEV_SECRET = open(path).read().strip() or None
+            if not _DEV_SECRET:
+                _DEV_SECRET = _s.token_urlsafe(48)
+                with open(path, "w") as f:
+                    f.write(_DEV_SECRET)
+        except Exception:
+            _DEV_SECRET = _DEV_SECRET or _s.token_urlsafe(48)
     return _DEV_SECRET
 
 

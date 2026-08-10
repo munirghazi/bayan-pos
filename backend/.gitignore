@@ -4,3 +4,4 @@ __pycache__/
 *.db
 uploads/
 .pytest_cache/
+.dev_secret

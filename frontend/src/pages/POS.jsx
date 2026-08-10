@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { productsAPI, salesAPI, donationsAPI, registersAPI, customersAPI, apiError } from '../services/api';
+import { COUNTRIES, flagOf, validateLocalPhone } from '../utils/countries';
 import Receipt from '../components/Receipt';
 import { SarIcon } from '../components/SarIcon';
 import { printReceipt } from '../utils/printReceipt';
@@ -59,6 +60,7 @@ export default function POS() {
   const [customerResults, setCustomerResults] = useState([]);
   const [showNewCustomer, setShowNewCustomer] = useState(false);
   const [newCustomer, setNewCustomer] = useState({ name: '', phone: '' });
+  const [countryIso, setCountryIso] = useState('SA');
 
   const posSettings = getPOSSettings();
 
@@ -96,7 +98,14 @@ export default function POS() {
   const selectCustomer = (c) => { setSelectedCustomer(c); setCustomerQuery(''); setCustomerResults([]); setShowNewCustomer(false); };
   const createCustomer = async () => {
     if (!newCustomer.name.trim()) { toast.error('الرجاء إدخال اسم العميل'); return; }
-    try { const res = await customersAPI.create({ name: newCustomer.name.trim(), phone: newCustomer.phone.trim() || null }); selectCustomer(res.data); setNewCustomer({ name: '', phone: '' }); toast.success('تم إضافة العميل'); }
+    let phone = null;
+    const local = (newCustomer.phone || '').replace(/\D/g, '').replace(/^0+/, '');
+    if (local) {
+      const country = COUNTRIES.find((c) => c.iso === countryIso) || COUNTRIES[0];
+      if (!validateLocalPhone(countryIso, local)) { toast.error('رقم الجوال غير صحيح لهذا البلد'); return; }
+      phone = `+${country.code}${local}`;
+    }
+    try { const res = await customersAPI.create({ name: newCustomer.name.trim(), phone }); selectCustomer(res.data); setNewCustomer({ name: '', phone: '' }); toast.success('تم إضافة العميل'); }
     catch (err) { toast.error(apiError(err, 'خطأ في إضافة العميل')); }
   };
 
@@ -465,14 +474,24 @@ export default function POS() {
                       placeholder="اسم العميل"
                       className="w-full px-3 py-2 rounded-lg border border-gray-300 outline-none text-sm text-right"
                     />
-                    <input
-                      type="text"
-                      value={newCustomer.phone}
-                      onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })}
-                      placeholder="الجوال (اختياري)"
-                      className="w-full px-3 py-2 rounded-lg border border-gray-300 outline-none text-sm text-right"
-                      dir="ltr"
-                    />
+                    <div className="flex gap-2" dir="ltr">
+                      <select
+                        value={countryIso}
+                        onChange={(e) => setCountryIso(e.target.value)}
+                        className="px-2 py-2 rounded-lg border border-gray-300 outline-none text-sm bg-white"
+                      >
+                        {COUNTRIES.map((c) => (
+                          <option key={c.iso} value={c.iso}>{flagOf(c.iso)} +{c.code}</option>
+                        ))}
+                      </select>
+                      <input
+                        type="tel"
+                        value={newCustomer.phone}
+                        onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })}
+                        placeholder="5XXXXXXXX (اختياري)"
+                        className="flex-1 px-3 py-2 rounded-lg border border-gray-300 outline-none text-sm"
+                      />
+                    </div>
                     <button
                       onClick={createCustomer}
                       className="w-full bg-bayan-green hover:bg-bayan-dark text-white px-3 py-2 rounded-lg text-sm"
