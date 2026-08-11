@@ -11,6 +11,7 @@ import Settings from './pages/Settings';
 import Branches from './pages/Branches';
 import Returns from './pages/Returns';
 import Suppliers from './pages/Suppliers';
+import UnitsOfMeasure from './pages/UnitsOfMeasure';
 
 function ProtectedLayout() {
   const token = localStorage.getItem('token');
@@ -63,6 +64,7 @@ export default function App() {
           <Route path="/branches" element={<Branches />} />
           <Route path="/returns" element={<Returns />} />
           <Route path="/suppliers" element={<Suppliers />} />
+          <Route path="/uom" element={<UnitsOfMeasure />} />
           <Route path="/settings" element={<Settings />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />

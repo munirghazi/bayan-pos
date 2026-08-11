@@ -161,6 +161,18 @@ export const suppliersAPI = {
   deleteDoc: (id, docType) => api.delete(`/suppliers/${id}/document/${docType}`),
 };
 
+export const uomAPI = {
+  categories: () => api.get('/uom/categories'),
+  createCategory: (data) => api.post('/uom/categories', data),
+  updateCategory: (id, data) => api.put(`/uom/categories/${id}`, data),
+  deleteCategory: (id) => api.delete(`/uom/categories/${id}`),
+  units: (categoryId) => api.get('/uom/units' + (categoryId ? `?category_id=${categoryId}` : '')),
+  createUnit: (data) => api.post('/uom/units', data),
+  updateUnit: (id, data) => api.put(`/uom/units/${id}`, data),
+  deleteUnit: (id) => api.delete(`/uom/units/${id}`),
+  convert: (qty, from_uom, to_uom) => api.get(`/uom/convert?qty=${qty}&from_uom=${from_uom}&to_uom=${to_uom}`),
+};
+
 export function apiError(err, fallback = 'حدث خطأ') {
   if (err && err.response) {
     const d = err.response.data && err.response.data.detail;

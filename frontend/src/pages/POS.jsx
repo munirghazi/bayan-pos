@@ -170,6 +170,16 @@ export default function POS() {
     }).filter(Boolean));
   };
 
+  const setQuantity = (productId, value) => {
+    let q = parseFloat(value);
+    if (isNaN(q) || q < 0) q = 0;
+    setCart(cart.map((item) => {
+      if (item.product_id !== productId) return item;
+      if (q > item.max_stock) { toast.error('الكمية المطلوبة غير متوفرة'); return { ...item, quantity: item.max_stock }; }
+      return { ...item, quantity: q };
+    }));
+  };
+
   const removeFromCart = (productId) => {
     setCart(cart.filter((item) => item.product_id !== productId));
   };
@@ -199,7 +209,7 @@ export default function POS() {
     setLoading(true);
     try {
       const res = await salesAPI.create({
-        items: cart.map((item) => ({
+        items: cart.filter((item) => item.quantity > 0).map((item) => ({
           product_id: item.product_id,
           quantity: item.quantity,
         })),
@@ -405,7 +415,14 @@ export default function POS() {
                   >
                     <HiOutlineMinus className="text-xs" />
                   </button>
-                  <span className="w-8 text-center font-bold text-sm">{item.quantity}</span>
+                  <input
+                    type="number"
+                    step="any"
+                    min="0"
+                    value={item.quantity}
+                    onChange={(e) => setQuantity(item.product_id, e.target.value)}
+                    className="w-14 text-center font-bold text-sm rounded border border-gray-200 py-1 outline-none focus:ring-1 focus:ring-bayan-green"
+                  />
                   <button
                     onClick={() => updateQuantity(item.product_id, 1)}
                     className="w-7 h-7 rounded-full bg-bayan-green hover:bg-bayan-dark text-white flex items-center justify-center transition-all"

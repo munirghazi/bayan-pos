@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { productsAPI, suppliersAPI, apiError } from '../services/api';
+import { productsAPI, suppliersAPI, uomAPI, apiError } from '../services/api';
 import { SarIcon } from '../components/SarIcon';
 import toast from 'react-hot-toast';
 import {
@@ -14,6 +14,7 @@ export default function Products() {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
+  const [units, setUnits] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [showCategoryForm, setShowCategoryForm] = useState(false);
@@ -32,6 +33,9 @@ export default function Products() {
     unit: '',
     reorder_level: '',
     default_supplier_id: '',
+    uom_id: '',
+    purchase_uom_id: '',
+    sales_uom_id: '',
     image_url: '',
     is_tax_exempt: false,
   });
@@ -41,6 +45,7 @@ export default function Products() {
   useEffect(() => {
     loadData();
     suppliersAPI.getAll().then((r) => setSuppliers(r.data)).catch(() => {});
+    uomAPI.units().then((r) => setUnits(r.data)).catch(() => {});
   }, []);
 
   const loadData = async () => {
@@ -72,12 +77,15 @@ export default function Products() {
         name: form.name,
         price: parseFloat(form.price),
         category_id: form.category_id ? parseInt(form.category_id) : null,
-        stock: parseInt(form.stock) || 0,
+        stock: parseFloat(form.stock) || 0,
         barcode: form.barcode || null,
         cost_price: parseFloat(form.cost_price) || 0,
         unit: form.unit || null,
-        reorder_level: parseInt(form.reorder_level) || 0,
+        reorder_level: parseFloat(form.reorder_level) || 0,
         default_supplier_id: form.default_supplier_id ? parseInt(form.default_supplier_id) : null,
+        uom_id: form.uom_id ? parseInt(form.uom_id) : null,
+        purchase_uom_id: form.purchase_uom_id ? parseInt(form.purchase_uom_id) : null,
+        sales_uom_id: form.sales_uom_id ? parseInt(form.sales_uom_id) : null,
         image_url: form.image_url || null,
         is_tax_exempt: form.is_tax_exempt,
       };
@@ -122,6 +130,9 @@ export default function Products() {
       unit: product.unit || '',
       reorder_level: product.reorder_level != null ? product.reorder_level.toString() : '',
       default_supplier_id: product.default_supplier_id?.toString() || '',
+      uom_id: product.uom_id?.toString() || '',
+      purchase_uom_id: product.purchase_uom_id?.toString() || '',
+      sales_uom_id: product.sales_uom_id?.toString() || '',
       image_url: product.image_url || '',
       is_tax_exempt: product.is_tax_exempt || false,
     });
@@ -129,7 +140,7 @@ export default function Products() {
   };
 
   const resetForm = () => {
-    setForm({ name: '', price: '', category_id: '', stock: '', barcode: '', cost_price: '', unit: '', reorder_level: '', default_supplier_id: '', image_url: '', is_tax_exempt: false });
+    setForm({ name: '', price: '', category_id: '', stock: '', barcode: '', cost_price: '', unit: '', reorder_level: '', default_supplier_id: '', uom_id: '', purchase_uom_id: '', sales_uom_id: '', image_url: '', is_tax_exempt: false });
     setEditingProduct(null);
     setShowForm(false);
   };
@@ -181,7 +192,10 @@ export default function Products() {
   };
 
   if (loading) {
-    return (
+    const baseUom = units.find((u) => u.id === parseInt(form.uom_id));
+  const sameCatUnits = baseUom ? units.filter((u) => u.category_id === baseUom.category_id) : [];
+
+  return (
       <div className="flex items-center justify-center h-full">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-bayan-green"></div>
       </div>
@@ -391,6 +405,38 @@ export default function Products() {
                   ))}
                 </select>
               </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">وحدة القياس الأساسية (المخزون)</label>
+                <select value={form.uom_id}
+                  onChange={(e) => setForm({ ...form, uom_id: e.target.value, purchase_uom_id: '', sales_uom_id: '' })}
+                  className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none">
+                  <option value="">بدون</option>
+                  {units.map((u) => (<option key={u.id} value={u.id}>{u.name}</option>))}
+                </select>
+              </div>
+              {form.uom_id && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">وحدة الشراء</label>
+                    <select value={form.purchase_uom_id}
+                      onChange={(e) => setForm({ ...form, purchase_uom_id: e.target.value })}
+                      className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none">
+                      <option value="">مثل الأساسية</option>
+                      {sameCatUnits.map((u) => (<option key={u.id} value={u.id}>{u.name}</option>))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">وحدة البيع</label>
+                    <select value={form.sales_uom_id}
+                      onChange={(e) => setForm({ ...form, sales_uom_id: e.target.value })}
+                      className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none">
+                      <option value="">مثل الأساسية</option>
+                      {sameCatUnits.map((u) => (<option key={u.id} value={u.id}>{u.name}</option>))}
+                    </select>
+                  </div>
+                </div>
+              )}
 
               {/* Tax exempt toggle */}
               <div className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 bg-gray-50">
