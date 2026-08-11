@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from database import get_db, Product, Category, KitComponent
+from database import get_db, Product, Category, KitComponent, Uom
 from routers.auth import get_current_user, require_admin, User
 from kits import available_quantity, reachable, components_of
 import os
@@ -48,6 +48,10 @@ class ProductResponse(BaseModel):
     unit: str | None = None
     reorder_level: float = 0
     default_supplier_id: int | None = None
+    uom_id: int | None = None
+    purchase_uom_id: int | None = None
+    sales_uom_id: int | None = None
+    uom_name: str | None = None
     image_url: str | None
     is_active: bool
     is_tax_exempt: bool = False
@@ -70,6 +74,9 @@ class ProductCreate(BaseModel):
     unit: str | None = None
     reorder_level: float = 0
     default_supplier_id: int | None = None
+    uom_id: int | None = None
+    purchase_uom_id: int | None = None
+    sales_uom_id: int | None = None
     image_url: str | None = None
     is_tax_exempt: bool = False
     is_kit: bool = False
@@ -86,6 +93,9 @@ class ProductUpdate(BaseModel):
     unit: str | None = None
     reorder_level: float | None = None
     default_supplier_id: int | None = None
+    uom_id: int | None = None
+    purchase_uom_id: int | None = None
+    sales_uom_id: int | None = None
     image_url: str | None = None
     is_active: bool | None = None
     is_tax_exempt: bool | None = None
@@ -119,6 +129,32 @@ def _apply_kit_components(db: Session, product: Product, components: list[KitCom
     db.flush()
 
 
+def _uom_name(db, uom_id):
+    if not uom_id:
+        return None
+    u = db.query(Uom).filter(Uom.id == uom_id).first()
+    return u.name if u else None
+
+
+def _validate_uoms(db, uom_id, purchase_uom_id, sales_uom_id):
+    """Purchase/sales units must belong to the same category as the base unit."""
+    if uom_id is None:
+        if purchase_uom_id or sales_uom_id:
+            raise HTTPException(status_code=400, detail="حدد وحدة القياس الأساسية أولاً")
+        return
+    base = db.query(Uom).filter(Uom.id == uom_id).first()
+    if not base:
+        raise HTTPException(status_code=400, detail="وحدة القياس الأساسية غير موجودة")
+    for other_id, label in ((purchase_uom_id, "وحدة الشراء"), (sales_uom_id, "وحدة البيع")):
+        if other_id:
+            o = db.query(Uom).filter(Uom.id == other_id).first()
+            if not o:
+                raise HTTPException(status_code=400, detail=f"{label} غير موجودة")
+            if o.category_id != base.category_id:
+                raise HTTPException(status_code=400,
+                                    detail=f"{label} يجب أن تكون من نفس فئة الوحدة الأساسية")
+
+
 def _serialize(db: Session, product: Product) -> dict:
     comps = []
     if product.is_kit:
@@ -142,6 +178,10 @@ def _serialize(db: Session, product: Product) -> dict:
         "unit": product.unit,
         "reorder_level": reorder,
         "default_supplier_id": product.default_supplier_id,
+        "uom_id": product.uom_id,
+        "purchase_uom_id": product.purchase_uom_id,
+        "sales_uom_id": product.sales_uom_id,
+        "uom_name": _uom_name(db, product.uom_id),
         "image_url": product.image_url,
         "is_active": product.is_active,
         "is_tax_exempt": product.is_tax_exempt,
@@ -214,6 +254,8 @@ def create_product(request: ProductCreate, db: Session = Depends(get_db), curren
     if request.is_kit and not request.components:
         raise HTTPException(status_code=400, detail="المنتج المُجمّع (kit) يجب أن يحتوي على مكوّن واحد على الأقل")
 
+    _validate_uoms(db, request.uom_id, request.purchase_uom_id, request.sales_uom_id)
+
     product = Product(
         name=request.name,
         price=request.price,
@@ -224,6 +266,9 @@ def create_product(request: ProductCreate, db: Session = Depends(get_db), curren
         unit=request.unit,
         reorder_level=request.reorder_level or 0,
         default_supplier_id=request.default_supplier_id,
+        uom_id=request.uom_id,
+        purchase_uom_id=request.purchase_uom_id,
+        sales_uom_id=request.sales_uom_id,
         image_url=request.image_url,
         is_tax_exempt=request.is_tax_exempt,
         is_kit=request.is_kit,
@@ -261,6 +306,13 @@ def update_product(product_id: int, request: ProductUpdate, db: Session = Depend
         product.reorder_level = request.reorder_level
     if request.default_supplier_id is not None:
         product.default_supplier_id = request.default_supplier_id
+    if request.uom_id is not None:
+        product.uom_id = request.uom_id
+    if request.purchase_uom_id is not None:
+        product.purchase_uom_id = request.purchase_uom_id
+    if request.sales_uom_id is not None:
+        product.sales_uom_id = request.sales_uom_id
+    _validate_uoms(db, product.uom_id, product.purchase_uom_id, product.sales_uom_id)
     if request.image_url is not None:
         product.image_url = request.image_url
     if request.is_active is not None:

@@ -10,8 +10,8 @@ from passlib.context import CryptContext
 from sqlalchemy import text
 
 from config import settings
-from database import SessionLocal, Tenant, TenantSettings, User, ensure_default_branch
-from routers import auth, products, sales, donations, reports, locations, customers, returns, delivery, suppliers, settings as settings_router
+from database import SessionLocal, Tenant, TenantSettings, User, ensure_default_branch, ensure_default_uom
+from routers import auth, products, sales, donations, reports, locations, customers, returns, delivery, suppliers, uom, settings as settings_router
 
 
 def bootstrap():
@@ -49,6 +49,7 @@ def bootstrap():
                 db.commit()
 
         ensure_default_branch(db, tenant.id)
+        ensure_default_uom(db, tenant.id)
     finally:
         db.close()
 
@@ -90,6 +91,7 @@ app.include_router(customers.router, prefix="/api/customers", tags=["العمل�
 app.include_router(returns.router, prefix="/api/returns", tags=["المرتجعات"])
 app.include_router(delivery.router, prefix="/api/delivery", tags=["الإرسال"])
 app.include_router(suppliers.router, prefix="/api/suppliers", tags=["الموردون"])
+app.include_router(uom.router, prefix="/api/uom", tags=["وحدات القياس"])
 app.include_router(settings_router.router, prefix="/api/settings", tags=["الإعدادات"])
 
 # --- Serve frontend build in production ---

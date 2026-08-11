@@ -127,6 +127,9 @@ class Product(Base):
     unit = Column(String(30), nullable=True)                   # e.g. حبة، كرتون، كجم
     reorder_level = Column(_QTY, default=0, nullable=False)
     default_supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=True)
+    uom_id = Column(Integer, ForeignKey("uoms.id"), nullable=True)            # base/stock unit
+    purchase_uom_id = Column(Integer, ForeignKey("uoms.id"), nullable=True)   # default buying unit
+    sales_uom_id = Column(Integer, ForeignKey("uoms.id"), nullable=True)      # default selling unit
     image_url = Column(String(500), nullable=True)
     is_active = Column(Boolean, default=True)
     is_tax_exempt = Column(Boolean, default=False)
@@ -210,8 +213,63 @@ TENANT_SCOPED_TABLES = [
     "tenant_settings", "users", "categories", "products",
     "sales", "sale_items", "donations", "kit_components",
     "locations", "registers", "customers", "returns", "return_items",
-    "suppliers", "supplier_documents",
+    "suppliers", "supplier_documents", "uom_categories", "uoms",
 ]
+
+
+class UomCategory(Base):
+    """A unit-of-measure category (e.g. عدد/Unit, وزن/Weight, حجم/Volume).
+    Conversions are only valid WITHIN a category."""
+    __tablename__ = "uom_categories"
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = _tenant_col()
+    name = Column(String(100), nullable=False)
+    decimal_places = Column(Integer, nullable=False, default=3)  # display/rounding precision
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    uoms = relationship("Uom", back_populates="category", cascade="all, delete-orphan")
+
+
+class Uom(Base):
+    """A unit within a category. `factor` = how many REFERENCE units make up one
+    of this unit (reference unit has factor 1). e.g. Weight ref=kg: g=0.001, ton=1000."""
+    __tablename__ = "uoms"
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = _tenant_col()
+    category_id = Column(Integer, ForeignKey("uom_categories.id", ondelete="CASCADE"),
+                         nullable=False, index=True)
+    name = Column(String(100), nullable=False)
+    factor = Column(Numeric(18, 6, asdecimal=False), nullable=False, default=1)
+    is_reference = Column(Boolean, default=False, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    category = relationship("UomCategory", back_populates="uoms")
+
+
+# (category_name, decimal_places, [(unit_name, factor, is_reference), ...])
+DEFAULT_UOM_SEED = [
+    ("عدد", 0, [("حبة", 1, True), ("دستة", 12, False), ("كرتون", 24, False)]),
+    ("وزن", 3, [("كجم", 1, True), ("جرام", 0.001, False), ("طن", 1000, False)]),
+    ("حجم", 3, [("لتر", 1, True), ("مل", 0.001, False)]),
+]
+
+
+def ensure_default_uom(db, tenant_id: int):
+    """Seed default UoM categories + units for a tenant if it has none. Idempotent."""
+    db.execute(text("SELECT set_config('app.current_tenant', :t, false)"),
+               {"t": str(int(tenant_id))})
+    if db.query(UomCategory).first() is not None:
+        return
+    for cat_name, dp, units in DEFAULT_UOM_SEED:
+        cat = UomCategory(tenant_id=tenant_id, name=cat_name, decimal_places=dp)
+        db.add(cat)
+        db.flush()
+        for uname, factor, is_ref in units:
+            db.add(Uom(tenant_id=tenant_id, category_id=cat.id, name=uname,
+                       factor=factor, is_reference=is_ref))
+    db.commit()
 
 
 class Supplier(Base):
