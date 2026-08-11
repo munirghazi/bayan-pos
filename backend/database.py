@@ -119,6 +119,11 @@ class Product(Base):
     price = Column(Float, nullable=False)
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
     stock = Column(Integer, default=0)
+    barcode = Column(String(64), nullable=True, index=True)
+    cost_price = Column(Float, default=0, nullable=False)      # for margin/COGS
+    unit = Column(String(30), nullable=True)                   # e.g. حبة، كرتون، كجم
+    reorder_level = Column(Integer, default=0, nullable=False)
+    default_supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=True)
     image_url = Column(String(500), nullable=True)
     is_active = Column(Boolean, default=True)
     is_tax_exempt = Column(Boolean, default=False)

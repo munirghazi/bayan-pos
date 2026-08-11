@@ -143,6 +143,24 @@ export const deliveryAPI = {
   sendEmail: (data) => api.post('/delivery/email', data),
 };
 
+export const suppliersAPI = {
+  getAll: (q) => api.get('/suppliers/' + (q ? `?q=${encodeURIComponent(q)}` : '')),
+  get: (id) => api.get(`/suppliers/${id}`),
+  create: (data) => api.post('/suppliers/', data),
+  update: (id, data) => api.put(`/suppliers/${id}`, data),
+  delete: (id) => api.delete(`/suppliers/${id}`),
+  compliance: (id) => api.get(`/suppliers/${id}/compliance`),
+  upsertDoc: (id, data) => api.put(`/suppliers/${id}/document`, data),
+  uploadDoc: (id, docType, file) => {
+    const fd = new FormData();
+    fd.append('doc_type', docType);
+    fd.append('file', file);
+    return api.post(`/suppliers/${id}/document/upload`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+  },
+  verifyDoc: (id, docType) => api.put(`/suppliers/${id}/document/${docType}/verify`),
+  deleteDoc: (id, docType) => api.delete(`/suppliers/${id}/document/${docType}`),
+};
+
 export function apiError(err, fallback = 'حدث خطأ') {
   if (err && err.response) {
     const d = err.response.data && err.response.data.detail;

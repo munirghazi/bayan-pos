@@ -43,11 +43,17 @@ class ProductResponse(BaseModel):
     category_id: int | None
     category: CategoryResponse | None
     stock: int
+    barcode: str | None = None
+    cost_price: float = 0
+    unit: str | None = None
+    reorder_level: int = 0
+    default_supplier_id: int | None = None
     image_url: str | None
     is_active: bool
     is_tax_exempt: bool = False
     is_kit: bool = False
     available_stock: int = 0
+    is_low_stock: bool = False
     components: list[KitComponentOut] = []
 
     class Config:
@@ -59,6 +65,11 @@ class ProductCreate(BaseModel):
     price: float
     category_id: int | None = None
     stock: int = 0
+    barcode: str | None = None
+    cost_price: float = 0
+    unit: str | None = None
+    reorder_level: int = 0
+    default_supplier_id: int | None = None
     image_url: str | None = None
     is_tax_exempt: bool = False
     is_kit: bool = False
@@ -70,6 +81,11 @@ class ProductUpdate(BaseModel):
     price: float | None = None
     category_id: int | None = None
     stock: int | None = None
+    barcode: str | None = None
+    cost_price: float | None = None
+    unit: str | None = None
+    reorder_level: int | None = None
+    default_supplier_id: int | None = None
     image_url: str | None = None
     is_active: bool | None = None
     is_tax_exempt: bool | None = None
@@ -112,6 +128,8 @@ def _serialize(db: Session, product: Product) -> dict:
                           "product_name": cp.name if cp else None,
                           "quantity": row.quantity})
     cat = product.category
+    avail = available_quantity(db, product)
+    reorder = product.reorder_level or 0
     return {
         "id": product.id,
         "name": product.name,
@@ -119,11 +137,17 @@ def _serialize(db: Session, product: Product) -> dict:
         "category_id": product.category_id,
         "category": {"id": cat.id, "name": cat.name} if cat else None,
         "stock": product.stock or 0,
+        "barcode": product.barcode,
+        "cost_price": product.cost_price or 0,
+        "unit": product.unit,
+        "reorder_level": reorder,
+        "default_supplier_id": product.default_supplier_id,
         "image_url": product.image_url,
         "is_active": product.is_active,
         "is_tax_exempt": product.is_tax_exempt,
         "is_kit": product.is_kit,
-        "available_stock": available_quantity(db, product),
+        "available_stock": avail,
+        "is_low_stock": bool(reorder > 0 and avail <= reorder),
         "components": comps,
     }
 
@@ -195,6 +219,11 @@ def create_product(request: ProductCreate, db: Session = Depends(get_db), curren
         price=request.price,
         category_id=request.category_id,
         stock=0 if request.is_kit else request.stock,
+        barcode=request.barcode,
+        cost_price=request.cost_price or 0,
+        unit=request.unit,
+        reorder_level=request.reorder_level or 0,
+        default_supplier_id=request.default_supplier_id,
         image_url=request.image_url,
         is_tax_exempt=request.is_tax_exempt,
         is_kit=request.is_kit,
@@ -222,6 +251,16 @@ def update_product(product_id: int, request: ProductUpdate, db: Session = Depend
         product.price = request.price
     if request.category_id is not None:
         product.category_id = request.category_id
+    if request.barcode is not None:
+        product.barcode = request.barcode
+    if request.cost_price is not None:
+        product.cost_price = request.cost_price
+    if request.unit is not None:
+        product.unit = request.unit
+    if request.reorder_level is not None:
+        product.reorder_level = request.reorder_level
+    if request.default_supplier_id is not None:
+        product.default_supplier_id = request.default_supplier_id
     if request.image_url is not None:
         product.image_url = request.image_url
     if request.is_active is not None:

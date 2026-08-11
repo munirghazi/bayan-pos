@@ -9,6 +9,7 @@ import {
   HiOutlineReceiptRefund,
   HiOutlineCog,
   HiOutlineOfficeBuilding,
+  HiOutlineTruck,
   HiOutlineLogout,
 } from 'react-icons/hi';
 
@@ -20,6 +21,7 @@ const menuItems = [
   { path: '/returns', icon: HiOutlineReceiptRefund, label: 'المرتجعات' },
   { path: '/reports', icon: HiOutlineChartBar, label: 'التقارير' },
   { path: '/branches', icon: HiOutlineOfficeBuilding, label: 'الفروع والصناديق' },
+  { path: '/suppliers', icon: HiOutlineTruck, label: 'الموردون' },
   { path: '/settings', icon: HiOutlineCog, label: 'الإعدادات' },
 ];
 
@@ -41,7 +43,7 @@ export default function Sidebar() {
 
   let filteredMenu = user.role === 'admin'
     ? menuItems
-    : menuItems.filter(item => !['/settings', '/branches'].includes(item.path));
+    : menuItems.filter(item => !['/settings', '/branches', '/suppliers'].includes(item.path));
 
   if (!posSettings.showDonation) {
     filteredMenu = filteredMenu.filter(item => item.path !== '/donations');
