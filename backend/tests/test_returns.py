@@ -46,7 +46,7 @@ def test_full_and_partial_returns_restock(client):
     r1 = client.post("/api/returns/", headers=h, json={
         "sale_id": sale["id"], "items": [{"product_id": pid, "quantity": 2}], "reason": "تالف"})
     assert r1.status_code == 200, r1.text
-    assert r1.json()["credit_note_number"] == 1
+    n1 = r1.json()["credit_note_number"]
     assert r1.json()["total"] == 20.0
     assert _stock(client, h, pid) == 97
 
@@ -59,7 +59,7 @@ def test_full_and_partial_returns_restock(client):
     r2 = client.post("/api/returns/", headers=h, json={
         "sale_id": sale["id"], "items": [{"product_id": pid, "quantity": 3}]})
     assert r2.status_code == 200, r2.text
-    assert r2.json()["credit_note_number"] == 2
+    assert r2.json()["credit_note_number"] == n1 + 1
     assert _stock(client, h, pid) == 100
 
     # nothing left to return

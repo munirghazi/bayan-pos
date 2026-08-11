@@ -8,6 +8,8 @@ Rules for this build:
 All queries below run on the caller's tenant-pinned session, so RLS keeps
 everything scoped to one tenant automatically.
 """
+import math
+
 from sqlalchemy.orm import Session
 
 from database import Product, KitComponent
@@ -21,49 +23,56 @@ def _product(db: Session, pid: int) -> Product | None:
     return db.query(Product).filter(Product.id == pid).first()
 
 
-def available_quantity(db: Session, product: Product, memo: dict | None = None) -> int:
+def available_quantity(db: Session, product: Product, memo: dict | None = None) -> float:
     """How many of `product` can be fulfilled from current stock.
 
-    Leaf product -> its own stock. Kit -> min over components of
-    floor(available(component) / qty). Missing/zero components -> 0.
+    Leaf product -> its own (possibly fractional) stock. Kit -> WHOLE kits only:
+    floor(min over components of available(component) / qty_per_kit). A kit
+    component may be fractional (e.g. 0.5 kg), but the kit yields whole units.
+    Missing/zero components -> 0.
     """
     if memo is None:
         memo = {}
     if product.id in memo:
         return memo[product.id]
     if not product.is_kit:
-        memo[product.id] = max(int(product.stock or 0), 0)
+        memo[product.id] = max(float(product.stock or 0), 0.0)
         return memo[product.id]
 
     memo[product.id] = 0  # break any accidental cycle during recursion
     rows = components_of(db, product.id)
     if not rows:
         return 0
-    best: int | None = None
+    best = None
     for row in rows:
         cp = _product(db, row.component_product_id)
-        if cp is None or row.quantity <= 0:
+        qty = float(row.quantity or 0)
+        if cp is None or qty <= 0:
             best = 0
             break
-        can = available_quantity(db, cp, memo) // row.quantity
+        can = math.floor(available_quantity(db, cp, memo) / qty)  # whole kits
         best = can if best is None else min(best, can)
-    result = max(best or 0, 0)
+    result = max(int(best or 0), 0)
     memo[product.id] = result
     return result
 
 
-def explode_to_leaves(db: Session, product: Product, quantity: int,
-                      acc: dict[int, int] | None = None) -> dict[int, int]:
-    """Aggregate leaf-product demand for selling `quantity` of `product`."""
+def explode_to_leaves(db: Session, product: Product, quantity: float,
+                      acc: dict[int, float] | None = None) -> dict[int, float]:
+    """Aggregate leaf-product demand for selling `quantity` of `product`.
+
+    Quantities may be fractional: selling 2 kits whose component is 0.5 kg
+    accumulates 1.0 kg of that leaf.
+    """
     if acc is None:
         acc = {}
     if not product.is_kit:
-        acc[product.id] = acc.get(product.id, 0) + quantity
+        acc[product.id] = round(acc.get(product.id, 0.0) + float(quantity), 3)
         return acc
     for row in components_of(db, product.id):
         cp = _product(db, row.component_product_id)
         if cp is not None:
-            explode_to_leaves(db, cp, quantity * row.quantity, acc)
+            explode_to_leaves(db, cp, float(quantity) * float(row.quantity), acc)
     return acc
 
 

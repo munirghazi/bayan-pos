@@ -16,7 +16,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     create_engine, event, text,
-    Column, Integer, String, Float, Boolean, DateTime, Date, ForeignKey, Text,
+    Column, Integer, String, Float, Numeric, Boolean, DateTime, Date, ForeignKey, Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
@@ -28,6 +28,9 @@ engine = create_engine(settings.database_url, pool_pre_ping=True, future=True,
                        connect_args={"client_encoding": "utf8"})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, future=True)
 Base = declarative_base()
+
+# Quantities/stock: exact NUMERIC(14,3) storage, float in Python (fractional units).
+_QTY = Numeric(14, 3, asdecimal=False)
 
 # SQL expression used both as the column DEFAULT and inside RLS policies.
 _TENANT_GUC = "NULLIF(current_setting('app.current_tenant', true), '')::integer"
@@ -118,11 +121,11 @@ class Product(Base):
     name = Column(String(200), nullable=False)
     price = Column(Float, nullable=False)
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
-    stock = Column(Integer, default=0)
+    stock = Column(_QTY, default=0)
     barcode = Column(String(64), nullable=True, index=True)
     cost_price = Column(Float, default=0, nullable=False)      # for margin/COGS
     unit = Column(String(30), nullable=True)                   # e.g. حبة، كرتون، كجم
-    reorder_level = Column(Integer, default=0, nullable=False)
+    reorder_level = Column(_QTY, default=0, nullable=False)
     default_supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=True)
     image_url = Column(String(500), nullable=True)
     is_active = Column(Boolean, default=True)
@@ -157,7 +160,7 @@ class SaleItem(Base):
     tenant_id = _tenant_col()
     sale_id = Column(Integer, ForeignKey("sales.id"), nullable=False)
     product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
-    quantity = Column(Integer, nullable=False)
+    quantity = Column(_QTY, nullable=False)
     price = Column(Float, nullable=False)
     is_tax_exempt = Column(Boolean, default=False)
 
@@ -199,7 +202,7 @@ class KitComponent(Base):
                             nullable=False, index=True)
     component_product_id = Column(Integer, ForeignKey("products.id", ondelete="CASCADE"),
                                   nullable=False, index=True)
-    quantity = Column(Integer, nullable=False, default=1)
+    quantity = Column(_QTY, nullable=False, default=1)
 
 
 # Tables that carry tenant_id and must have RLS enabled.
@@ -273,7 +276,7 @@ class ReturnItem(Base):
     return_id = Column(Integer, ForeignKey("returns.id", ondelete="CASCADE"),
                        nullable=False, index=True)
     product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
-    quantity = Column(Integer, nullable=False)
+    quantity = Column(_QTY, nullable=False)
     price = Column(Float, nullable=False)                   # unit price at sale time
 
     return_ref = relationship("Return", back_populates="items")

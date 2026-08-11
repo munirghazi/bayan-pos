@@ -13,7 +13,7 @@ router = APIRouter()
 
 class SaleItemCreate(BaseModel):
     product_id: int
-    quantity: int
+    quantity: float
 
 
 class SaleCreate(BaseModel):
@@ -28,7 +28,7 @@ class SaleItemResponse(BaseModel):
     id: int
     product_id: int
     product_name: str | None = None
-    quantity: int
+    quantity: float
     price: float
     is_tax_exempt: bool = False
 
@@ -74,7 +74,7 @@ def create_sale(request: SaleCreate, db: Session = Depends(get_db), current_user
 
     total = 0.0
     sale_items = []
-    leaf_demand: dict[int, int] = {}   # leaf product id -> total units this sale needs
+    leaf_demand: dict[int, float] = {}   # leaf product id -> total units this sale needs
 
     for item in request.items:
         if item.quantity <= 0:
@@ -82,6 +82,8 @@ def create_sale(request: SaleCreate, db: Session = Depends(get_db), current_user
         product = db.query(Product).filter(Product.id == item.product_id).first()
         if not product:
             raise HTTPException(status_code=404, detail=f"المنتج رقم {item.product_id} غير موجود")
+        if product.is_kit and float(item.quantity) != int(item.quantity):
+            raise HTTPException(status_code=400, detail=f"كمية '{product.name}' يجب أن تكون عدداً صحيحاً")
 
         # Kits use their fixed price; stock is deducted from leaf components.
         item_total = product.price * item.quantity
@@ -100,8 +102,9 @@ def create_sale(request: SaleCreate, db: Session = Depends(get_db), current_user
         leaf = db.query(Product).filter(Product.id == leaf_id).first()
         if leaf is None:
             raise HTTPException(status_code=400, detail=f"أحد مكوّنات المنتج (رقم {leaf_id}) غير موجود")
-        if int(leaf.stock or 0) < need:
-            raise HTTPException(status_code=400, detail=f"الكمية المطلوبة من '{leaf.name}' غير متوفرة. المتاح: {int(leaf.stock or 0)}")
+        if round(float(leaf.stock or 0), 3) < round(float(need), 3):
+            avail = round(float(leaf.stock or 0), 3)
+            raise HTTPException(status_code=400, detail=f"الكمية المطلوبة من '{leaf.name}' غير متوفرة. المتاح: {avail:g}")
 
     # Create sale
     sale = Sale(
@@ -128,7 +131,7 @@ def create_sale(request: SaleCreate, db: Session = Depends(get_db), current_user
     # Deduct stock from leaf products only.
     for leaf_id, need in leaf_demand.items():
         leaf = db.query(Product).filter(Product.id == leaf_id).first()
-        leaf.stock = int(leaf.stock or 0) - need
+        leaf.stock = round(float(leaf.stock or 0) - float(need), 3)
 
     db.commit()
     db.refresh(sale)

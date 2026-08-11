@@ -14,7 +14,7 @@ router = APIRouter()
 
 class ReturnItemIn(BaseModel):
     product_id: int
-    quantity: int
+    quantity: float
 
 
 class ReturnCreate(BaseModel):
@@ -33,7 +33,7 @@ def _returned_map(db: Session, sale_id: int) -> dict[int, int]:
         .group_by(ReturnItem.product_id)
         .all()
     )
-    return {pid: int(q) for pid, q in rows}
+    return {pid: float(q) for pid, q in rows}
 
 
 def _format_return(r: Return) -> dict:
@@ -119,6 +119,9 @@ def create_return(req: ReturnCreate, db: Session = Depends(get_db),
         si = sold.get(it.product_id)
         if not si:
             raise HTTPException(status_code=400, detail="أحد الأصناف غير موجود في الفاتورة الأصلية")
+        prod = db.query(Product).filter(Product.id == it.product_id).first()
+        if prod and prod.is_kit and float(it.quantity) != int(it.quantity):
+            raise HTTPException(status_code=400, detail=f"كمية '{prod.name}' يجب أن تكون عدداً صحيحاً")
         remaining = si.quantity - already.get(it.product_id, 0)
         if it.quantity > remaining:
             prod = db.query(Product).filter(Product.id == it.product_id).first()
@@ -146,7 +149,7 @@ def create_return(req: ReturnCreate, db: Session = Depends(get_db),
     for leaf_id, qty in leaf_restock.items():
         leaf = db.query(Product).filter(Product.id == leaf_id).first()
         if leaf:
-            leaf.stock = int(leaf.stock or 0) + qty
+            leaf.stock = round(float(leaf.stock or 0) + float(qty), 3)
 
     db.commit()
     db.refresh(ret)

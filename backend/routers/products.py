@@ -27,13 +27,13 @@ class CategoryResponse(BaseModel):
 
 class KitComponentIn(BaseModel):
     product_id: int
-    quantity: int = 1
+    quantity: float = 1
 
 
 class KitComponentOut(BaseModel):
     product_id: int
     product_name: str | None = None
-    quantity: int
+    quantity: float
 
 
 class ProductResponse(BaseModel):
@@ -42,17 +42,17 @@ class ProductResponse(BaseModel):
     price: float
     category_id: int | None
     category: CategoryResponse | None
-    stock: int
+    stock: float
     barcode: str | None = None
     cost_price: float = 0
     unit: str | None = None
-    reorder_level: int = 0
+    reorder_level: float = 0
     default_supplier_id: int | None = None
     image_url: str | None
     is_active: bool
     is_tax_exempt: bool = False
     is_kit: bool = False
-    available_stock: int = 0
+    available_stock: float = 0
     is_low_stock: bool = False
     components: list[KitComponentOut] = []
 
@@ -64,11 +64,11 @@ class ProductCreate(BaseModel):
     name: str
     price: float
     category_id: int | None = None
-    stock: int = 0
+    stock: float = 0
     barcode: str | None = None
     cost_price: float = 0
     unit: str | None = None
-    reorder_level: int = 0
+    reorder_level: float = 0
     default_supplier_id: int | None = None
     image_url: str | None = None
     is_tax_exempt: bool = False
@@ -80,11 +80,11 @@ class ProductUpdate(BaseModel):
     name: str | None = None
     price: float | None = None
     category_id: int | None = None
-    stock: int | None = None
+    stock: float | None = None
     barcode: str | None = None
     cost_price: float | None = None
     unit: str | None = None
-    reorder_level: int | None = None
+    reorder_level: float | None = None
     default_supplier_id: int | None = None
     image_url: str | None = None
     is_active: bool | None = None
@@ -317,7 +317,7 @@ async def upload_image(file: UploadFile = File(...), current_user: User = Depend
 
 
 @router.put("/{product_id}/stock")
-def update_stock(product_id: int, quantity: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def update_stock(product_id: int, quantity: float, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="المنتج غير موجود")

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { productsAPI, apiError } from '../services/api';
+import { productsAPI, suppliersAPI, apiError } from '../services/api';
 import { SarIcon } from '../components/SarIcon';
 import toast from 'react-hot-toast';
 import {
@@ -13,6 +13,7 @@ import {
 export default function Products() {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [showCategoryForm, setShowCategoryForm] = useState(false);
@@ -26,6 +27,11 @@ export default function Products() {
     price: '',
     category_id: '',
     stock: '',
+    barcode: '',
+    cost_price: '',
+    unit: '',
+    reorder_level: '',
+    default_supplier_id: '',
     image_url: '',
     is_tax_exempt: false,
   });
@@ -34,6 +40,7 @@ export default function Products() {
 
   useEffect(() => {
     loadData();
+    suppliersAPI.getAll().then((r) => setSuppliers(r.data)).catch(() => {});
   }, []);
 
   const loadData = async () => {
@@ -66,6 +73,11 @@ export default function Products() {
         price: parseFloat(form.price),
         category_id: form.category_id ? parseInt(form.category_id) : null,
         stock: parseInt(form.stock) || 0,
+        barcode: form.barcode || null,
+        cost_price: parseFloat(form.cost_price) || 0,
+        unit: form.unit || null,
+        reorder_level: parseInt(form.reorder_level) || 0,
+        default_supplier_id: form.default_supplier_id ? parseInt(form.default_supplier_id) : null,
         image_url: form.image_url || null,
         is_tax_exempt: form.is_tax_exempt,
       };
@@ -105,6 +117,11 @@ export default function Products() {
       price: product.price.toString(),
       category_id: product.category_id?.toString() || '',
       stock: product.stock.toString(),
+      barcode: product.barcode || '',
+      cost_price: product.cost_price != null ? product.cost_price.toString() : '',
+      unit: product.unit || '',
+      reorder_level: product.reorder_level != null ? product.reorder_level.toString() : '',
+      default_supplier_id: product.default_supplier_id?.toString() || '',
       image_url: product.image_url || '',
       is_tax_exempt: product.is_tax_exempt || false,
     });
@@ -112,7 +129,7 @@ export default function Products() {
   };
 
   const resetForm = () => {
-    setForm({ name: '', price: '', category_id: '', stock: '', image_url: '', is_tax_exempt: false });
+    setForm({ name: '', price: '', category_id: '', stock: '', barcode: '', cost_price: '', unit: '', reorder_level: '', default_supplier_id: '', image_url: '', is_tax_exempt: false });
     setEditingProduct(null);
     setShowForm(false);
   };
@@ -239,8 +256,11 @@ export default function Products() {
                 <p className="font-bold text-bayan-green text-lg">{product.price.toFixed(2)} <SarIcon size={15} /></p>
               </div>
               <div className="flex items-center justify-between mt-3">
-                <span className={`text-sm ${product.stock <= 5 ? 'text-red-500 font-bold' : 'text-gray-500'}`}>
+                <span className={`text-sm ${product.is_low_stock ? 'text-red-500 font-bold' : 'text-gray-500'}`}>
                   المخزون: {product.stock}
+                  {product.is_low_stock && (
+                    <span className="mr-2 text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full">منخفض</span>
+                  )}
                 </span>
                 {user.role === 'admin' && (
                   <div className="flex gap-2">
@@ -326,6 +346,48 @@ export default function Products() {
                   <option value="">بدون تصنيف</option>
                   {categories.map((cat) => (
                     <option key={cat.id} value={cat.id}>{cat.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">سعر التكلفة</label>
+                  <input type="number" step="0.01" value={form.cost_price}
+                    onChange={(e) => setForm({ ...form, cost_price: e.target.value })}
+                    className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none" placeholder="0.00" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">الوحدة</label>
+                  <input type="text" value={form.unit}
+                    onChange={(e) => setForm({ ...form, unit: e.target.value })}
+                    className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none" placeholder="حبة / كرتون / كجم" />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">حد إعادة الطلب</label>
+                  <input type="number" value={form.reorder_level}
+                    onChange={(e) => setForm({ ...form, reorder_level: e.target.value })}
+                    className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none" placeholder="0" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">الباركود</label>
+                  <input type="text" value={form.barcode}
+                    onChange={(e) => setForm({ ...form, barcode: e.target.value })}
+                    className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none" dir="ltr" placeholder="—" />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">المورّد الافتراضي</label>
+                <select value={form.default_supplier_id}
+                  onChange={(e) => setForm({ ...form, default_supplier_id: e.target.value })}
+                  className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none">
+                  <option value="">بدون</option>
+                  {suppliers.map((sup) => (
+                    <option key={sup.id} value={sup.id}>{sup.name}{sup.is_compliant ? '' : ' (غير متوافق)'}</option>
                   ))}
                 </select>
               </div>
