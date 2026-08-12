@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { purchaseOrdersAPI, suppliersAPI, productsAPI, uomAPI, apiError } from '../services/api';
+import { purchaseOrdersAPI, goodsReceiptsAPI, suppliersAPI, productsAPI, uomAPI, apiError } from '../services/api';
 import toast from 'react-hot-toast';
 import {
   HiOutlineClipboardList, HiOutlinePlus, HiOutlineTrash, HiOutlineX,
@@ -25,6 +25,8 @@ export default function PurchaseOrders() {
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ supplier_id: '', notes: '', lines: [{ ...emptyLine }] });
   const [expanded, setExpanded] = useState(null);
+  const [receiveFor, setReceiveFor] = useState(null);
+  const [rcvLines, setRcvLines] = useState({});
 
   useEffect(() => { loadAll(); }, []);
 
@@ -84,6 +86,33 @@ export default function PurchaseOrders() {
       resetForm();
       loadAll();
     } catch (err) { toast.error(apiError(err, 'خطأ في الإنشاء')); }
+  };
+
+  const openReceive = (po) => {
+    const init = {};
+    po.lines.forEach((ln) => {
+      const remaining = Number(ln.quantity) - Number(ln.received_qty || 0);
+      init[ln.id] = { qty: '', cost: ln.unit_cost != null ? String(ln.unit_cost) : '', remaining };
+    });
+    setRcvLines(init);
+    setReceiveFor(po.id);
+  };
+
+  const submitReceive = async (po) => {
+    const lines = po.lines
+      .filter((ln) => parseFloat(rcvLines[ln.id]?.qty) > 0)
+      .map((ln) => ({
+        po_line_id: ln.id,
+        qty_received: parseFloat(rcvLines[ln.id].qty),
+        unit_cost: rcvLines[ln.id].cost !== '' ? parseFloat(rcvLines[ln.id].cost) : null,
+      }));
+    if (lines.length === 0) { toast.error('أدخل كمية استلام واحدة على الأقل'); return; }
+    try {
+      await goodsReceiptsAPI.create({ po_id: po.id, lines });
+      toast.success('تم استلام البضاعة وتحديث المخزون');
+      setReceiveFor(null);
+      loadAll();
+    } catch (err) { toast.error(apiError(err, 'خطأ في الاستلام')); }
   };
 
   const act = async (fn, id, okMsg) => {
@@ -232,10 +261,58 @@ export default function PurchaseOrders() {
                             <button onClick={() => act(purchaseOrdersAPI.cancel, po.id, 'تم الإلغاء')} className="bg-red-100 hover:bg-red-200 text-red-700 px-4 py-1.5 rounded text-sm">إلغاء</button>
                           </>
                         )}
-                        {po.status === 'approved' && (
-                          <span className="text-sm text-gray-500">معتمد — الاستلام يُضاف لاحقاً (P5.5)</span>
+                        {(po.status === 'approved' || po.status === 'receiving') && (
+                          <button onClick={() => openReceive(po)}
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-1.5 rounded text-sm">استلام بضاعة</button>
                         )}
                       </div>
+
+                      {receiveFor === po.id && (
+                        <div className="mt-3 border-t pt-3">
+                          <h4 className="font-bold text-gray-800 mb-2">استلام بضاعة</h4>
+                          <table className="w-full text-sm text-right mb-3">
+                            <thead>
+                              <tr className="text-gray-500 border-b">
+                                <th className="py-2 font-medium">المنتج</th><th className="py-2 font-medium">المطلوب</th>
+                                <th className="py-2 font-medium">المستلم</th><th className="py-2 font-medium">المتبقي</th>
+                                <th className="py-2 font-medium">كمية الاستلام</th><th className="py-2 font-medium">التكلفة</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {po.lines.map((ln) => {
+                                const remaining = Number(ln.quantity) - Number(ln.received_qty || 0);
+                                return (
+                                  <tr key={ln.id} className="border-b last:border-0">
+                                    <td className="py-2">{ln.product_name} {ln.uom_name ? `(${ln.uom_name})` : ''}</td>
+                                    <td className="py-2">{ln.quantity}</td>
+                                    <td className="py-2">{ln.received_qty || 0}</td>
+                                    <td className="py-2 font-medium">{remaining}</td>
+                                    <td className="py-2">
+                                      <input type="number" step="any" min="0" max={remaining}
+                                        value={rcvLines[ln.id]?.qty ?? ''}
+                                        disabled={remaining <= 0}
+                                        onChange={(e) => setRcvLines({ ...rcvLines, [ln.id]: { ...rcvLines[ln.id], qty: e.target.value } })}
+                                        className="w-20 px-2 py-1 rounded border border-gray-300 outline-none text-center disabled:bg-gray-100" />
+                                    </td>
+                                    <td className="py-2">
+                                      <input type="number" step="any"
+                                        value={rcvLines[ln.id]?.cost ?? ''}
+                                        onChange={(e) => setRcvLines({ ...rcvLines, [ln.id]: { ...rcvLines[ln.id], cost: e.target.value } })}
+                                        className="w-24 px-2 py-1 rounded border border-gray-300 outline-none text-center" />
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                          <div className="flex gap-2">
+                            <button onClick={() => submitReceive(po)}
+                              className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-2 rounded-lg text-sm">تأكيد الاستلام</button>
+                            <button onClick={() => setReceiveFor(null)}
+                              className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-6 py-2 rounded-lg text-sm">إغلاق</button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

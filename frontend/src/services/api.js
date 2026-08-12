@@ -190,6 +190,12 @@ export const purchaseOrdersAPI = {
   delete: (id) => api.delete(`/purchase-orders/${id}`),
 };
 
+export const goodsReceiptsAPI = {
+  create: (data) => api.post('/goods-receipts/', data),
+  getAll: (poId) => api.get('/goods-receipts/' + (poId ? `?po_id=${poId}` : '')),
+  get: (id) => api.get(`/goods-receipts/${id}`),
+};
+
 export function apiError(err, fallback = 'حدث خطأ') {
   if (err && err.response) {
     const d = err.response.data && err.response.data.detail;

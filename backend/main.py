@@ -11,7 +11,7 @@ from sqlalchemy import text
 
 from config import settings
 from database import SessionLocal, Tenant, TenantSettings, User, ensure_default_branch, ensure_default_uom
-from routers import auth, products, sales, donations, reports, locations, customers, returns, delivery, suppliers, uom, stock, purchase_orders, settings as settings_router
+from routers import auth, products, sales, donations, reports, locations, customers, returns, delivery, suppliers, uom, stock, purchase_orders, goods_receipts, settings as settings_router
 
 
 def bootstrap():
@@ -94,6 +94,7 @@ app.include_router(suppliers.router, prefix="/api/suppliers", tags=["المور�
 app.include_router(uom.router, prefix="/api/uom", tags=["وحدات القياس"])
 app.include_router(stock.router, prefix="/api/stock", tags=["المخزون"])
 app.include_router(purchase_orders.router, prefix="/api/purchase-orders", tags=["أوامر الشراء"])
+app.include_router(goods_receipts.router, prefix="/api/goods-receipts", tags=["سندات الاستلام"])
 app.include_router(settings_router.router, prefix="/api/settings", tags=["الإعدادات"])
 
 # --- Serve frontend build in production ---

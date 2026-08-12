@@ -217,7 +217,39 @@ TENANT_SCOPED_TABLES = [
     "locations", "registers", "customers", "returns", "return_items",
     "suppliers", "supplier_documents", "uom_categories", "uoms",
     "stock_movements", "purchase_orders", "purchase_order_lines",
+    "goods_receipts", "goods_receipt_lines",
 ]
+
+
+class GoodsReceipt(Base):
+    """Receiving goods against a purchase order (full or partial)."""
+    __tablename__ = "goods_receipts"
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = _tenant_col()
+    po_id = Column(Integer, ForeignKey("purchase_orders.id"), nullable=False, index=True)
+    received_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    notes = Column(String(500), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    lines = relationship("GoodsReceiptLine", back_populates="receipt",
+                         cascade="all, delete-orphan")
+    po = relationship("PurchaseOrder")
+
+
+class GoodsReceiptLine(Base):
+    __tablename__ = "goods_receipt_lines"
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = _tenant_col()
+    receipt_id = Column(Integer, ForeignKey("goods_receipts.id", ondelete="CASCADE"),
+                        nullable=False, index=True)
+    po_line_id = Column(Integer, ForeignKey("purchase_order_lines.id"), nullable=False)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
+    qty_received = Column(_QTY, nullable=False)            # in the purchase unit
+    base_qty = Column(_QTY, nullable=False)               # converted to base unit
+    unit_cost = Column(Numeric(14, 3, asdecimal=False), nullable=False, default=0)
+
+    receipt = relationship("GoodsReceipt", back_populates="lines")
+    product = relationship("Product")
 
 
 class PurchaseOrder(Base):
