@@ -179,6 +179,17 @@ export const stockAPI = {
   movements: (productId) => api.get('/stock/movements' + (productId ? `?product_id=${productId}` : '')),
 };
 
+export const purchaseOrdersAPI = {
+  getAll: (status) => api.get('/purchase-orders/' + (status ? `?status=${status}` : '')),
+  get: (id) => api.get(`/purchase-orders/${id}`),
+  create: (data) => api.post('/purchase-orders/', data),
+  update: (id, data) => api.put(`/purchase-orders/${id}`, data),
+  submit: (id) => api.post(`/purchase-orders/${id}/submit`),
+  approve: (id) => api.post(`/purchase-orders/${id}/approve`),
+  cancel: (id) => api.post(`/purchase-orders/${id}/cancel`),
+  delete: (id) => api.delete(`/purchase-orders/${id}`),
+};
+
 export function apiError(err, fallback = 'حدث خطأ') {
   if (err && err.response) {
     const d = err.response.data && err.response.data.detail;

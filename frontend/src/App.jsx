@@ -13,6 +13,7 @@ import Returns from './pages/Returns';
 import Suppliers from './pages/Suppliers';
 import UnitsOfMeasure from './pages/UnitsOfMeasure';
 import Inventory from './pages/Inventory';
+import PurchaseOrders from './pages/PurchaseOrders';
 
 function ProtectedLayout() {
   const token = localStorage.getItem('token');
@@ -67,6 +68,7 @@ export default function App() {
           <Route path="/suppliers" element={<Suppliers />} />
           <Route path="/uom" element={<UnitsOfMeasure />} />
           <Route path="/inventory" element={<Inventory />} />
+          <Route path="/purchase-orders" element={<PurchaseOrders />} />
           <Route path="/settings" element={<Settings />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
