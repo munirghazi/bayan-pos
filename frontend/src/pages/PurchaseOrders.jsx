@@ -220,13 +220,17 @@ export default function PurchaseOrders() {
                     </div>
                     <div className="flex items-center gap-3">
                       <span className="text-gray-600 text-sm">{po.total.toFixed(2)} ر.س</span>
+                      {(po.status === 'approved' || po.status === 'receiving') && (
+                        <button onClick={(e) => { e.stopPropagation(); setExpanded(po.id); openReceive(po); }}
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1 rounded text-xs whitespace-nowrap">استلام</button>
+                      )}
                       <span className={`text-xs px-2 py-0.5 rounded-full ${st.cls}`}>{st.label}</span>
                     </div>
                   </div>
 
                   {expanded === po.id && (
-                    <div className="px-4 pb-4 bg-gray-50/50">
-                      <table className="w-full text-sm text-right mb-3">
+                    <div className="px-4 pb-4 bg-gray-50/50 overflow-x-auto">
+                      <table className="w-full text-sm text-right mb-3 min-w-[520px]">
                         <thead>
                           <tr className="text-gray-500 border-b">
                             <th className="py-2 font-medium">المنتج</th><th className="py-2 font-medium">الكمية</th>
@@ -270,7 +274,8 @@ export default function PurchaseOrders() {
                       {receiveFor === po.id && (
                         <div className="mt-3 border-t pt-3">
                           <h4 className="font-bold text-gray-800 mb-2">استلام بضاعة</h4>
-                          <table className="w-full text-sm text-right mb-3">
+                          <div className="overflow-x-auto">
+                          <table className="w-full text-sm text-right mb-3 min-w-[560px]">
                             <thead>
                               <tr className="text-gray-500 border-b">
                                 <th className="py-2 font-medium">المنتج</th><th className="py-2 font-medium">المطلوب</th>
@@ -305,6 +310,7 @@ export default function PurchaseOrders() {
                               })}
                             </tbody>
                           </table>
+                          </div>
                           <div className="flex gap-2">
                             <button onClick={() => submitReceive(po)}
                               className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-2 rounded-lg text-sm">تأكيد الاستلام</button>
