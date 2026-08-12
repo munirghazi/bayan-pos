@@ -15,6 +15,7 @@ export default function Products() {
   const [categories, setCategories] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
   const [units, setUnits] = useState([]);
+  const [uomCategories, setUomCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [showCategoryForm, setShowCategoryForm] = useState(false);
@@ -33,6 +34,7 @@ export default function Products() {
     unit: '',
     reorder_level: '',
     default_supplier_id: '',
+    uom_category_id: '',
     uom_id: '',
     purchase_uom_id: '',
     sales_uom_id: '',
@@ -46,6 +48,7 @@ export default function Products() {
     loadData();
     suppliersAPI.getAll().then((r) => setSuppliers(r.data)).catch(() => {});
     uomAPI.units().then((r) => setUnits(r.data)).catch(() => {});
+    uomAPI.categories().then((r) => setUomCategories(r.data)).catch(() => {});
   }, []);
 
   const loadData = async () => {
@@ -130,6 +133,7 @@ export default function Products() {
       unit: product.unit || '',
       reorder_level: product.reorder_level != null ? product.reorder_level.toString() : '',
       default_supplier_id: product.default_supplier_id?.toString() || '',
+      uom_category_id: (() => { const u = units.find((x) => x.id === product.uom_id); return u ? u.category_id.toString() : ''; })(),
       uom_id: product.uom_id?.toString() || '',
       purchase_uom_id: product.purchase_uom_id?.toString() || '',
       sales_uom_id: product.sales_uom_id?.toString() || '',
@@ -140,7 +144,7 @@ export default function Products() {
   };
 
   const resetForm = () => {
-    setForm({ name: '', price: '', category_id: '', stock: '', barcode: '', cost_price: '', unit: '', reorder_level: '', default_supplier_id: '', uom_id: '', purchase_uom_id: '', sales_uom_id: '', image_url: '', is_tax_exempt: false });
+    setForm({ name: '', price: '', category_id: '', stock: '', barcode: '', cost_price: '', unit: '', reorder_level: '', default_supplier_id: '', uom_category_id: '', uom_id: '', purchase_uom_id: '', sales_uom_id: '', image_url: '', is_tax_exempt: false });
     setEditingProduct(null);
     setShowForm(false);
   };
@@ -192,8 +196,9 @@ export default function Products() {
   };
 
   if (loading) {
-    const baseUom = units.find((u) => u.id === parseInt(form.uom_id));
-  const sameCatUnits = baseUom ? units.filter((u) => u.category_id === baseUom.category_id) : [];
+    const catUnits = form.uom_category_id
+    ? units.filter((u) => u.category_id === parseInt(form.uom_category_id))
+    : [];
 
   return (
       <div className="flex items-center justify-center h-full">
@@ -406,14 +411,25 @@ export default function Products() {
                 </select>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">وحدة القياس الأساسية (المخزون)</label>
-                <select value={form.uom_id}
-                  onChange={(e) => setForm({ ...form, uom_id: e.target.value, purchase_uom_id: '', sales_uom_id: '' })}
-                  className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none">
-                  <option value="">بدون</option>
-                  {units.map((u) => (<option key={u.id} value={u.id}>{u.name}</option>))}
-                </select>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">فئة وحدة القياس</label>
+                  <select value={form.uom_category_id}
+                    onChange={(e) => setForm({ ...form, uom_category_id: e.target.value, uom_id: '', purchase_uom_id: '', sales_uom_id: '' })}
+                    className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none">
+                    <option value="">بدون</option>
+                    {uomCategories.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">الوحدة الأساسية (المخزون)</label>
+                  <select value={form.uom_id} disabled={!form.uom_category_id}
+                    onChange={(e) => setForm({ ...form, uom_id: e.target.value })}
+                    className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none disabled:bg-gray-100">
+                    <option value="">بدون</option>
+                    {catUnits.map((u) => (<option key={u.id} value={u.id}>{u.name}</option>))}
+                  </select>
+                </div>
               </div>
               {form.uom_id && (
                 <div className="grid grid-cols-2 gap-4">
@@ -423,7 +439,7 @@ export default function Products() {
                       onChange={(e) => setForm({ ...form, purchase_uom_id: e.target.value })}
                       className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none">
                       <option value="">مثل الأساسية</option>
-                      {sameCatUnits.map((u) => (<option key={u.id} value={u.id}>{u.name}</option>))}
+                      {catUnits.map((u) => (<option key={u.id} value={u.id}>{u.name}</option>))}
                     </select>
                   </div>
                   <div>
@@ -432,7 +448,7 @@ export default function Products() {
                       onChange={(e) => setForm({ ...form, sales_uom_id: e.target.value })}
                       className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none">
                       <option value="">مثل الأساسية</option>
-                      {sameCatUnits.map((u) => (<option key={u.id} value={u.id}>{u.name}</option>))}
+                      {catUnits.map((u) => (<option key={u.id} value={u.id}>{u.name}</option>))}
                     </select>
                   </div>
                 </div>

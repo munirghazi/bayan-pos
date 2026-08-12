@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from database import get_db, Sale, SaleItem, Product, Register, Customer
 from routers.auth import get_current_user, User
 from kits import explode_to_leaves
+from stock import record_movement
 from datetime import datetime
 
 router = APIRouter()
@@ -132,6 +133,8 @@ def create_sale(request: SaleCreate, db: Session = Depends(get_db), current_user
     for leaf_id, need in leaf_demand.items():
         leaf = db.query(Product).filter(Product.id == leaf_id).first()
         leaf.stock = round(float(leaf.stock or 0) - float(need), 3)
+        record_movement(db, leaf, -float(need), "out", ref_type="sale",
+                        ref_id=sale.id, user_id=current_user.id)
 
     db.commit()
     db.refresh(sale)

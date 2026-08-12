@@ -173,6 +173,12 @@ export const uomAPI = {
   convert: (qty, from_uom, to_uom) => api.get(`/uom/convert?qty=${qty}&from_uom=${from_uom}&to_uom=${to_uom}`),
 };
 
+export const stockAPI = {
+  stockIn: (data) => api.post('/stock/in', data),
+  adjust: (data) => api.post('/stock/adjust', data),
+  movements: (productId) => api.get('/stock/movements' + (productId ? `?product_id=${productId}` : '')),
+};
+
 export function apiError(err, fallback = 'حدث خطأ') {
   if (err && err.response) {
     const d = err.response.data && err.response.data.detail;

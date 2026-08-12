@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from database import get_db, Sale, SaleItem, Product, Return, ReturnItem
 from routers.auth import get_current_user, User
 from kits import explode_to_leaves
+from stock import record_movement
 
 router = APIRouter()
 
@@ -150,6 +151,8 @@ def create_return(req: ReturnCreate, db: Session = Depends(get_db),
         leaf = db.query(Product).filter(Product.id == leaf_id).first()
         if leaf:
             leaf.stock = round(float(leaf.stock or 0) + float(qty), 3)
+            record_movement(db, leaf, float(qty), "in", ref_type="return",
+                            ref_id=ret.id, user_id=user.id)
 
     db.commit()
     db.refresh(ret)

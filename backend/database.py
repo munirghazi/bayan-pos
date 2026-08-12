@@ -214,7 +214,26 @@ TENANT_SCOPED_TABLES = [
     "sales", "sale_items", "donations", "kit_components",
     "locations", "registers", "customers", "returns", "return_items",
     "suppliers", "supplier_documents", "uom_categories", "uoms",
+    "stock_movements",
 ]
+
+
+class StockMovement(Base):
+    """Append-only stock ledger. `qty` is the signed change (in +, out -),
+    `balance_after` is the product's base-unit stock right after the movement."""
+    __tablename__ = "stock_movements"
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = _tenant_col()
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False, index=True)
+    type = Column(String(20), nullable=False)              # in | out | adjust
+    qty = Column(Numeric(14, 3, asdecimal=False), nullable=False)
+    balance_after = Column(Numeric(14, 3, asdecimal=False), nullable=False)
+    unit_cost = Column(Numeric(14, 3, asdecimal=False), nullable=True)
+    ref_type = Column(String(30), nullable=True)           # sale | return | manual | adjustment
+    ref_id = Column(Integer, nullable=True)
+    note = Column(String(300), nullable=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 
 class UomCategory(Base):
