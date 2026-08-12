@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from database import get_db, Sale, SaleItem, Product, Register, Customer
 from routers.auth import get_current_user, User
 from kits import explode_to_leaves
-from stock import record_movement
+from stock import record_movement, to_base_qty
 from datetime import datetime
 
 router = APIRouter()
@@ -15,6 +15,7 @@ router = APIRouter()
 class SaleItemCreate(BaseModel):
     product_id: int
     quantity: float
+    uom_id: int | None = None   # unit sold in; defaults to the product's sales unit
 
 
 class SaleCreate(BaseModel):
@@ -30,6 +31,8 @@ class SaleItemResponse(BaseModel):
     product_id: int
     product_name: str | None = None
     quantity: float
+    uom_id: int | None = None
+    uom_name: str | None = None
     price: float
     is_tax_exempt: bool = False
 
@@ -86,17 +89,21 @@ def create_sale(request: SaleCreate, db: Session = Depends(get_db), current_user
         if product.is_kit and float(item.quantity) != int(item.quantity):
             raise HTTPException(status_code=400, detail=f"كمية '{product.name}' يجب أن تكون عدداً صحيحاً")
 
-        # Kits use their fixed price; stock is deducted from leaf components.
+        # Option B: price is per SELLING unit; stock deducts in BASE units.
+        sell_uom_id = item.uom_id or product.sales_uom_id or product.uom_id
+        base_qty = item.quantity if product.is_kit else to_base_qty(db, product, item.quantity, sell_uom_id)
+
         item_total = product.price * item.quantity
         total += item_total
         sale_items.append({
             "product": product,
-            "quantity": item.quantity,
-            "price": product.price,
+            "quantity": item.quantity,        # in the selling unit
+            "uom_id": sell_uom_id,
+            "price": product.price,           # per selling unit
             "is_tax_exempt": product.is_tax_exempt,
         })
-        # Explode kits down to leaf products; a plain product maps to itself.
-        explode_to_leaves(db, product, item.quantity, leaf_demand)
+        # Deduct stock in base units (1 شرنك -> 27 حبة).
+        explode_to_leaves(db, product, base_qty, leaf_demand)
 
     # Validate leaf stock across the WHOLE sale (kits + direct lines combined).
     for leaf_id, need in leaf_demand.items():
@@ -125,6 +132,7 @@ def create_sale(request: SaleCreate, db: Session = Depends(get_db), current_user
             sale_id=sale.id,
             product_id=item_data["product"].id,
             quantity=item_data["quantity"],
+            uom_id=item_data["uom_id"],
             price=item_data["price"],
             is_tax_exempt=item_data["is_tax_exempt"],
         ))
@@ -179,6 +187,8 @@ def _format_sale(sale: Sale) -> dict:
                 "product_id": item.product_id,
                 "product_name": item.product.name if item.product else None,
                 "quantity": item.quantity,
+                "uom_id": item.uom_id,
+                "uom_name": item.uom.name if getattr(item, "uom", None) else None,
                 "price": item.price,
                 "is_tax_exempt": item.is_tax_exempt,
             }

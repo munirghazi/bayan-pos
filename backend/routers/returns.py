@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from database import get_db, Sale, SaleItem, Product, Return, ReturnItem
 from routers.auth import get_current_user, User
 from kits import explode_to_leaves
-from stock import record_movement
+from stock import record_movement, to_base_qty
 
 router = APIRouter()
 
@@ -131,8 +131,9 @@ def create_return(req: ReturnCreate, db: Session = Depends(get_db),
                                 detail=f"الكمية المرتجعة من '{name}' تتجاوز المتبقي ({remaining})")
         total += si.price * it.quantity
         product = db.query(Product).filter(Product.id == it.product_id).first()
-        # Reverse the sale's stock math: explode kits to leaves and restock leaves.
-        explode_to_leaves(db, product, it.quantity, leaf_restock)
+        # Reverse the sale's stock math in BASE units (convert from the sold unit).
+        base_qty = it.quantity if product.is_kit else to_base_qty(db, product, it.quantity, si.uom_id)
+        explode_to_leaves(db, product, base_qty, leaf_restock)
         validated.append((it.product_id, it.quantity, si.price))
 
     next_no = (db.query(func.coalesce(func.max(Return.credit_note_number), 0)).scalar() or 0) + 1

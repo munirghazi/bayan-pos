@@ -196,16 +196,16 @@ export default function Products() {
   };
 
   if (loading) {
-    const catUnits = form.uom_category_id
-    ? units.filter((u) => u.category_id === parseInt(form.uom_category_id))
-    : [];
-
-  return (
+    return (
       <div className="flex items-center justify-center h-full">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-bayan-green"></div>
       </div>
     );
   }
+
+  const catUnits = form.uom_category_id
+    ? units.filter((u) => u.category_id === parseInt(form.uom_category_id))
+    : [];
 
   return (
     <div className="space-y-6">

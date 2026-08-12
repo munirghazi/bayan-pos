@@ -163,12 +163,14 @@ class SaleItem(Base):
     tenant_id = _tenant_col()
     sale_id = Column(Integer, ForeignKey("sales.id"), nullable=False)
     product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
-    quantity = Column(_QTY, nullable=False)
-    price = Column(Float, nullable=False)
+    quantity = Column(_QTY, nullable=False)               # in the selling unit (uom_id)
+    uom_id = Column(Integer, ForeignKey("uoms.id"), nullable=True)
+    price = Column(Float, nullable=False)                 # per selling unit
     is_tax_exempt = Column(Boolean, default=False)
 
     sale = relationship("Sale", back_populates="items")
     product = relationship("Product", back_populates="sale_items")
+    uom = relationship("Uom")
 
 
 class Donation(Base):
