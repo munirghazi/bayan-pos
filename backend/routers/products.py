@@ -237,8 +237,12 @@ def get_products(db: Session = Depends(get_db), current_user: User = Depends(get
 
 
 @router.get("/all", response_model=list[ProductResponse])
-def get_all_products(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
-    return [_serialize(db, p) for p in db.query(Product).all()]
+def get_all_products(include_inactive: bool = False, db: Session = Depends(get_db),
+                     current_user: User = Depends(require_admin)):
+    q = db.query(Product)
+    if not include_inactive:
+        q = q.filter(Product.is_active == True)  # noqa: E712
+    return [_serialize(db, p) for p in q.all()]
 
 
 @router.get("/{product_id}", response_model=ProductResponse)

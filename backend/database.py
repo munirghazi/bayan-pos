@@ -216,8 +216,46 @@ TENANT_SCOPED_TABLES = [
     "sales", "sale_items", "donations", "kit_components",
     "locations", "registers", "customers", "returns", "return_items",
     "suppliers", "supplier_documents", "uom_categories", "uoms",
-    "stock_movements",
+    "stock_movements", "purchase_orders", "purchase_order_lines",
 ]
+
+
+class PurchaseOrder(Base):
+    """A purchase order to a supplier. Cannot be submitted/approved unless the
+    supplier is compliant (CR/VAT/National Address verified and unexpired)."""
+    __tablename__ = "purchase_orders"
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = _tenant_col()
+    supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=False, index=True)
+    po_number = Column(Integer, nullable=False)            # per-tenant sequential
+    status = Column(String(20), nullable=False, default="draft")
+    # draft | submitted | approved | receiving | received | closed | cancelled
+    notes = Column(String(500), nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    lines = relationship("PurchaseOrderLine", back_populates="po",
+                         cascade="all, delete-orphan")
+    supplier = relationship("Supplier")
+
+
+class PurchaseOrderLine(Base):
+    __tablename__ = "purchase_order_lines"
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = _tenant_col()
+    po_id = Column(Integer, ForeignKey("purchase_orders.id", ondelete="CASCADE"),
+                   nullable=False, index=True)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
+    quantity = Column(_QTY, nullable=False)                # in the purchase unit
+    uom_id = Column(Integer, ForeignKey("uoms.id"), nullable=True)
+    unit_cost = Column(Numeric(14, 3, asdecimal=False), nullable=False, default=0)
+    received_qty = Column(_QTY, nullable=False, default=0)  # in the purchase unit
+
+    po = relationship("PurchaseOrder", back_populates="lines")
+    product = relationship("Product")
+    uom = relationship("Uom")
 
 
 class StockMovement(Base):
