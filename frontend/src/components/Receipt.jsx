@@ -108,7 +108,7 @@ const Receipt = forwardRef(({ sale, type = 'sale', donation = null }, ref) => {
                       <span className="text-gray-400 mr-1" style={{ fontSize: '9px' }}>(معفى)</span>
                     )}
                   </td>
-                  <td className="text-center py-1">{item.quantity}</td>
+                  <td className="text-center py-1">{item.quantity}{item.uom_name ? ` ${item.uom_name}` : ''}</td>
                   <td className="text-center py-1">{item.price.toFixed(2)}</td>
                   <td className="text-left py-1">{(item.quantity * item.price).toFixed(2)}</td>
                 </tr>

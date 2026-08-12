@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { productsAPI, salesAPI, donationsAPI, registersAPI, customersAPI, apiError } from '../services/api';
 import { COUNTRIES, flagOf, validateLocalPhone } from '../utils/countries';
-import { deliveryAPI } from '../services/api';
+import { deliveryAPI, uomAPI } from '../services/api';
 import Receipt from '../components/Receipt';
 import { SarIcon } from '../components/SarIcon';
 import { printReceipt } from '../utils/printReceipt';
@@ -117,10 +117,13 @@ export default function POS() {
     }
   }, [posSettings.paymentMethods]);
 
+  const [units, setUnits] = useState([]);
+
   const loadProducts = async () => {
     try {
       const res = await productsAPI.getAll();
       setProducts(res.data);
+      try { const u = await uomAPI.units(); setUnits(u.data); } catch (e) {}
     } catch (err) {
       toast.error('خطأ في تحميل المنتجات');
     }
@@ -130,28 +133,38 @@ export default function POS() {
     p.name.includes(search) && p.stock > 0
   );
 
+  const buildLine = (product) => {
+    const availBase = product.available_stock != null ? product.available_stock : product.stock;
+    let uom_id = null, unit_name = '', maxSell = availBase, price = product.price;
+    if (!product.is_kit && product.uom_id) {
+      const sellId = product.sales_uom_id || product.uom_id;
+      const sell = units.find((u) => u.id === sellId);
+      const base = units.find((u) => u.id === product.uom_id);
+      if (sell && base) {
+        uom_id = sell.id;
+        unit_name = sell.name;
+        maxSell = sell.factor ? (availBase * (base.factor || 1)) / sell.factor : availBase;
+      }
+    }
+    return {
+      product_id: product.id, name: product.name, price, quantity: 1,
+      uom_id, unit_name, max_stock: maxSell,
+      image_url: product.image_url, is_tax_exempt: product.is_tax_exempt || false,
+    };
+  };
+
   const addToCart = (product) => {
     const existing = cart.find((item) => item.product_id === product.id);
     if (existing) {
-      if (existing.quantity >= product.stock) {
+      if (existing.quantity + 1 > existing.max_stock) {
         toast.error('الكمية المطلوبة غير متوفرة');
         return;
       }
       setCart(cart.map((item) =>
-        item.product_id === product.id
-          ? { ...item, quantity: item.quantity + 1 }
-          : item
+        item.product_id === product.id ? { ...item, quantity: item.quantity + 1 } : item
       ));
     } else {
-      setCart([...cart, {
-        product_id: product.id,
-        name: product.name,
-        price: product.price,
-        quantity: 1,
-        max_stock: product.stock,
-        image_url: product.image_url,
-        is_tax_exempt: product.is_tax_exempt || false,
-      }]);
+      setCart([...cart, buildLine(product)]);
     }
   };
 
@@ -212,6 +225,7 @@ export default function POS() {
         items: cart.filter((item) => item.quantity > 0).map((item) => ({
           product_id: item.product_id,
           quantity: item.quantity,
+          uom_id: item.uom_id || null,
         })),
         payment_method: paymentMethod,
         card_ref: paymentMethod === 'card' ? cardRef.trim() : null,
@@ -423,6 +437,7 @@ export default function POS() {
                     onChange={(e) => setQuantity(item.product_id, e.target.value)}
                     className="w-14 text-center font-bold text-sm rounded border border-gray-200 py-1 outline-none focus:ring-1 focus:ring-bayan-green"
                   />
+                  {item.unit_name && <span className="text-xs text-gray-400 min-w-[2.5rem]">{item.unit_name}</span>}
                   <button
                     onClick={() => updateQuantity(item.product_id, 1)}
                     className="w-7 h-7 rounded-full bg-bayan-green hover:bg-bayan-dark text-white flex items-center justify-center transition-all"
