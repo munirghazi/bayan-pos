@@ -1,8 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi.responses import JSONResponse
+import idempotency
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from database import get_db, Sale, SaleItem, Product, Register, Customer
+from database import get_db, Sale, SaleItem, Product, Register, Customer, ConsignmentItem, ConsignmentLedger
 from routers.auth import get_current_user, User
+from capabilities import require_sales, require_invoice_identity
 from kits import explode_to_leaves
 from stock import record_movement, to_base_qty
 from datetime import datetime
@@ -16,6 +19,7 @@ class SaleItemCreate(BaseModel):
     product_id: int
     quantity: float
     uom_id: int | None = None   # unit sold in; defaults to the product's sales unit
+    consignment_item_id: int | None = None
 
 
 class SaleCreate(BaseModel):
@@ -60,7 +64,12 @@ class SaleResponse(BaseModel):
 # ===================== Routes =====================
 
 @router.post("/", response_model=SaleResponse)
-def create_sale(request: SaleCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def create_sale(request: SaleCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), _caps: dict = Depends(require_sales),
+                _inv: None = Depends(require_invoice_identity),
+                idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")):
+    prior = idempotency.replay(db, idempotency_key, "sales")
+    if prior is not None:
+        return JSONResponse(content=prior)
     if not request.items:
         raise HTTPException(status_code=400, detail="يجب إضافة منتج واحد على الأقل")
 
@@ -91,6 +100,27 @@ def create_sale(request: SaleCreate, db: Session = Depends(get_db), current_user
 
         # Option B: price is per SELLING unit; stock deducts in BASE units.
         sell_uom_id = item.uom_id or product.sales_uom_id or product.uom_id
+
+        # --- consigned lot: sell from separated consigned stock, accrue to consignor ---
+        if getattr(item, "consignment_item_id", None):
+            ci = db.query(ConsignmentItem).filter(
+                ConsignmentItem.id == item.consignment_item_id).first()
+            if not ci or ci.product_id != product.id:
+                raise HTTPException(status_code=400, detail="صنف الأمانة غير صالح")
+            if getattr(ci, "status", "active") != "active":
+                raise HTTPException(status_code=400, detail="صنف الأمانة غير متاح للبيع")
+            if round(float(ci.qty_remaining or 0), 3) < round(float(item.quantity), 3):
+                raise HTTPException(status_code=400,
+                    detail=f"الكمية المتاحة من الأمانة غير كافية. المتاح: {round(float(ci.qty_remaining or 0),3):g}")
+            line_price = ci.unit_price
+            total += line_price * item.quantity
+            sale_items.append({
+                "product": product, "quantity": item.quantity, "uom_id": sell_uom_id,
+                "price": line_price, "is_tax_exempt": product.is_tax_exempt,
+                "consignment_item": ci,
+            })
+            continue   # do NOT touch owned stock
+
         base_qty = item.quantity if product.is_kit else to_base_qty(db, product, item.quantity, sell_uom_id)
 
         item_total = product.price * item.quantity
@@ -101,6 +131,7 @@ def create_sale(request: SaleCreate, db: Session = Depends(get_db), current_user
             "uom_id": sell_uom_id,
             "price": product.price,           # per selling unit
             "is_tax_exempt": product.is_tax_exempt,
+            "consignment_item": None,
         })
         # Deduct stock in base units (1 شرنك -> 27 حبة).
         explode_to_leaves(db, product, base_qty, leaf_demand)
@@ -128,6 +159,7 @@ def create_sale(request: SaleCreate, db: Session = Depends(get_db), current_user
 
     # Sale lines record the sold product (the kit itself, at its fixed price).
     for item_data in sale_items:
+        ci = item_data.get("consignment_item")
         db.add(SaleItem(
             sale_id=sale.id,
             product_id=item_data["product"].id,
@@ -135,7 +167,18 @@ def create_sale(request: SaleCreate, db: Session = Depends(get_db), current_user
             uom_id=item_data["uom_id"],
             price=item_data["price"],
             is_tax_exempt=item_data["is_tax_exempt"],
+            consignment_item_id=(ci.id if ci else None),
         ))
+        # consigned lot: decrement remaining + accrue consignor share
+        if ci:
+            ci.qty_remaining = round(float(ci.qty_remaining) - float(item_data["quantity"]), 3)
+            subtotal = float(item_data["price"]) * float(item_data["quantity"])
+            shop_share = subtotal * (float(ci.commission_percent or 0) / 100.0)
+            consignor_share = round(subtotal - shop_share, 2)
+            db.add(ConsignmentLedger(
+                consignor_id=ci.consignor_id, entry_type="accrual",
+                sale_id=sale.id, consignment_item_id=ci.id, amount=consignor_share,
+                note=f"بيع {item_data['quantity']:g} × {item_data['product'].name}"))
 
     # Deduct stock from leaf products only.
     for leaf_id, need in leaf_demand.items():
@@ -147,7 +190,9 @@ def create_sale(request: SaleCreate, db: Session = Depends(get_db), current_user
     db.commit()
     db.refresh(sale)
 
-    return _format_sale(sale)
+    _resp = _format_sale(sale)
+    idempotency.store(db, idempotency_key, "sales", _resp)
+    return _resp
 
 
 @router.get("/", response_model=list[SaleResponse])

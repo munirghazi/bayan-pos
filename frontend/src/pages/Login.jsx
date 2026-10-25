@@ -1,6 +1,9 @@
+import Logo from '../components/Logo';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { authAPI, settingsAPI } from '../services/api';
+import { applyTheme, storeTheme } from '../utils/theme';
+import { saveCapabilities } from '../utils/posSettings';
 import { saveZATCASettings } from '../utils/zatca';
 import toast from 'react-hot-toast';
 
@@ -32,11 +35,13 @@ export default function Login() {
       localStorage.setItem('user', JSON.stringify(res.data.user));
       localStorage.setItem('tenant_name', res.data.tenant_name || '');
       localStorage.setItem('tenant_slug', res.data.tenant_slug || '');
+      try { const cap = await authAPI.getCapabilities(); saveCapabilities(cap.data); } catch (e) {}
       try {
         const st = await settingsAPI.getTenant();
         const d = st.data;
         saveZATCASettings({ sellerName: d.seller_name || '', vatNumber: d.vat_number || '', vatRate: (d.vat_rate ?? 15) / 100 });
         localStorage.setItem('tenant_logo', d.logo_url || '');
+        applyTheme(d); storeTheme(d);
       } catch (e) {}
       toast.success(`مرحباً ${res.data.user.full_name}`);
       navigate('/');
@@ -59,12 +64,12 @@ export default function Login() {
               className="h-20 mx-auto mb-4 object-contain"
             />
           ) : (
-            <div className="w-20 h-20 bg-bayan-green rounded-full mx-auto flex items-center justify-center mb-4">
-              <span className="text-3xl text-white font-bold">بيان</span>
+            <div className="w-20 h-20 mx-auto flex items-center justify-center mb-4">
+              <Logo size={72} />
             </div>
           )}
-          <h1 className="text-2xl font-bold text-gray-800">نظام نقاط البيع</h1>
-          <p className="text-gray-500 mt-2">تسجيل دخول الجهة</p>
+          <h1 className="text-2xl font-bold text-gray-800">سهل</h1>
+          <p className="text-gray-500 mt-2">نقاط بيع وتبرّع ذكية</p>
         </div>
 
         {/* Form */}

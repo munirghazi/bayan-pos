@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { productsAPI, salesAPI, donationsAPI, registersAPI, customersAPI, apiError } from '../services/api';
+import { productsAPI, salesAPI, donationsAPI, registersAPI, customersAPI, settingsAPI, consignmentAPI, apiError } from '../services/api';
+import { Link } from 'react-router-dom';
 import { COUNTRIES, flagOf, validateLocalPhone } from '../utils/countries';
 import { deliveryAPI, uomAPI } from '../services/api';
 import Receipt from '../components/Receipt';
 import { SarIcon } from '../components/SarIcon';
 import { printReceipt } from '../utils/printReceipt';
 import { downloadPDF, shareViaWhatsApp, pdfToBase64 } from '../utils/generatePDF';
-import { getPOSSettings } from '../utils/posSettings';
+import { getPOSSettings, getCapabilities } from '../utils/posSettings';
 import toast from 'react-hot-toast';
 import {
   HiOutlineSearch,
@@ -17,6 +18,7 @@ import {
   HiOutlineCreditCard,
   HiOutlineDeviceMobile,
   HiOutlineHeart,
+  HiOutlineArchive,
   HiOutlinePrinter,
   HiOutlineDocumentDownload,
   HiOutlineMail,
@@ -38,6 +40,7 @@ const ALL_PAYMENT_METHODS = [
 export default function POS() {
   const [products, setProducts] = useState([]);
   const [cart, setCart] = useState([]);
+  const [consignLots, setConsignLots] = useState([]);
   const [search, setSearch] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [cashReceived, setCashReceived] = useState('');
@@ -54,6 +57,14 @@ export default function POS() {
   const [showShareMenu, setShowShareMenu] = useState(false);
   const receiptRef = useRef(null);
   const checkoutRef = useRef(false);
+  const saleIdemRef = useRef(null);
+  const donationIdemRef = useRef(null);
+  const newIdemKey = () =>
+    (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const [addrIncomplete, setAddrIncomplete] = useState(false);
+  const [addrBannerDismissed, setAddrBannerDismissed] = useState(false);
   const [registers, setRegisters] = useState([]);
   const [registerId, setRegisterId] = useState(() => localStorage.getItem('pos_register_id') || '');
   const [selectedCustomer, setSelectedCustomer] = useState(null);
@@ -64,6 +75,16 @@ export default function POS() {
   const [countryIso, setCountryIso] = useState('SA');
 
   const posSettings = getPOSSettings();
+  const caps = getCapabilities();
+
+  useEffect(() => {
+    if (!caps.sales_enabled) return;
+    settingsAPI.getTenant().then(({ data }) => {
+      const required = ['building_number', 'street_name', 'district', 'city', 'postal_code'];
+      const missing = required.some((k) => !data[k] || String(data[k]).trim() === '');
+      setAddrIncomplete(missing);
+    }).catch(() => {});
+  }, []);
 
   const enabledPaymentMethods = useMemo(() => {
     const methods = ALL_PAYMENT_METHODS.filter((m) => posSettings.paymentMethods[m.key]);
@@ -72,6 +93,7 @@ export default function POS() {
 
   useEffect(() => {
     loadProducts();
+    if (getCapabilities().sales_enabled) loadConsignLots();
     loadRegisters();
   }, []);
 
@@ -119,6 +141,11 @@ export default function POS() {
 
   const [units, setUnits] = useState([]);
 
+  const loadConsignLots = async () => {
+    try { const { data } = await consignmentAPI.getStock(); setConsignLots(data); }
+    catch (e) { /* consignment optional */ }
+  };
+
   const loadProducts = async () => {
     try {
       const res = await productsAPI.getAll();
@@ -129,8 +156,58 @@ export default function POS() {
     }
   };
 
-  const filteredProducts = products.filter((p) =>
-    p.name.includes(search) && p.stock > 0
+  const availOf = (p) => (p.available_stock != null ? p.available_stock : p.stock);
+  const consignAsProducts = consignLots.map((lot) => ({
+    id: 'c' + lot.id, name: lot.product_name, price: lot.unit_price,
+    stock: lot.qty_remaining, available_stock: lot.qty_remaining,
+    barcode: lot.barcode, image_url: null,
+    __consign: lot,   // marks a consigned pseudo-product
+  }));
+  const term = search.trim();
+  const matchP = (p) => (p.name || '').includes(term) || (p.barcode && p.barcode === term);
+  const filteredProducts = [...products, ...consignAsProducts].filter(
+    (p) => matchP(p) && (p.__consign ? p.stock > 0 : availOf(p) > 0)
+  );
+
+  // Group the product grid by category (consigned items in their own group),
+  // matching the Products screen. Named categories first (Arabic order),
+  // then "بدون تصنيف", then "أمانات".
+  const groupedProducts = (() => {
+    const map = {};
+    for (const p of filteredProducts) {
+      const key = p.__consign ? 'أمانات' : (p.category?.name || 'بدون تصنيف');
+      (map[key] = map[key] || []).push(p);
+    }
+    const rank = (k) => (k === 'أمانات' ? 2 : k === 'بدون تصنيف' ? 1 : 0);
+    return Object.entries(map).sort(
+      (a, b) => rank(a[0]) - rank(b[0]) || a[0].localeCompare(b[0], 'ar')
+    );
+  })();
+
+  const renderProductCard = (product) => (
+    <button
+      key={product.id}
+      onClick={() => addToCart(product)}
+      className="pos-card bg-white rounded-xl border border-gray-200 p-3 hover:shadow-lg hover:border-bayan-green transition-all text-center group"
+    >
+      {product.image_url ? (
+        <img
+          src={product.image_url}
+          alt={product.name}
+          className="pos-card-img w-full h-24 object-cover rounded-lg mb-2"
+        />
+      ) : (
+        <div className="pos-card-img w-full h-24 bg-gray-100 rounded-lg mb-2 flex items-center justify-center">
+          <span className="text-3xl text-gray-300">📦</span>
+        </div>
+      )}
+      <p className="font-medium text-gray-800 text-sm truncate">{product.name}</p>
+      <p className="text-bayan-green font-bold mt-1">{(product.price || 0).toFixed(2)} <SarIcon size={14} /></p>
+      <p className="text-xs text-gray-400 mt-1">المتبقي: {product.stock}</p>
+      {product.__consign && (
+        <span className="inline-block mt-1 text-[10px] bg-amber-100 text-amber-700 rounded px-1.5 py-0.5">أمانة · {product.__consign.consignor_name || ''}</span>
+      )}
+    </button>
   );
 
   const buildLine = (product) => {
@@ -147,30 +224,58 @@ export default function POS() {
       }
     }
     return {
+      key: 'p' + product.id,
       product_id: product.id, name: product.name, price, quantity: 1,
       uom_id, unit_name, max_stock: maxSell,
       image_url: product.image_url, is_tax_exempt: product.is_tax_exempt || false,
+      consignment_item_id: null,
     };
   };
 
   const addToCart = (product) => {
-    const existing = cart.find((item) => item.product_id === product.id);
+    if (product.__consign) { addConsignedLot(product.__consign); return; }
+    const k = 'p' + product.id;
+    const existing = cart.find((item) => item.key === k);
     if (existing) {
       if (existing.quantity + 1 > existing.max_stock) {
         toast.error('الكمية المطلوبة غير متوفرة');
         return;
       }
       setCart(cart.map((item) =>
-        item.product_id === product.id ? { ...item, quantity: item.quantity + 1 } : item
+        item.key === k ? { ...item, quantity: item.quantity + 1 } : item
       ));
     } else {
       setCart([...cart, buildLine(product)]);
     }
   };
 
-  const updateQuantity = (productId, delta) => {
+  const handleSearchKey = async (e) => {
+    if (e.key !== 'Enter') return;
+    const code = search.trim();
+    if (!code) return;
+    // already visible in the grid? add the single match
+    if (filteredProducts.length === 1) { addToCart(filteredProducts[0]); setSearch(''); return; }
+    // otherwise try a consigned barcode lookup (scan-to-sell)
+    try {
+      const { data } = await consignmentAPI.lookup(code);
+      addConsignedLot(data); setSearch('');
+    } catch (err) { /* not a consigned barcode; leave search as-is */ }
+  };
+
+  const addConsignedLot = (lot) => {
+    const k = 'c' + lot.id;
+    if (cart.find((item) => item.key === k)) { toast('هذا الصنف مضاف بالفعل', { icon: 'ℹ️' }); return; }
+    setCart([...cart, {
+      key: k, product_id: lot.product_id,
+      name: `أمانة: ${lot.product_name}`, price: lot.unit_price, quantity: 1,
+      uom_id: null, unit_name: '', max_stock: lot.qty_remaining,
+      is_tax_exempt: false, consignment_item_id: lot.id,
+    }]);
+  };
+
+  const updateQuantity = (key, delta) => {
     setCart(cart.map((item) => {
-      if (item.product_id === productId) {
+      if (item.key === key) {
         const newQty = item.quantity + delta;
         if (newQty <= 0) return null;
         if (newQty > item.max_stock) {
@@ -183,18 +288,18 @@ export default function POS() {
     }).filter(Boolean));
   };
 
-  const setQuantity = (productId, value) => {
+  const setQuantity = (key, value) => {
     let q = parseFloat(value);
     if (isNaN(q) || q < 0) q = 0;
     setCart(cart.map((item) => {
-      if (item.product_id !== productId) return item;
+      if (item.key !== key) return item;
       if (q > item.max_stock) { toast.error('الكمية المطلوبة غير متوفرة'); return { ...item, quantity: item.max_stock }; }
       return { ...item, quantity: q };
     }));
   };
 
-  const removeFromCart = (productId) => {
-    setCart(cart.filter((item) => item.product_id !== productId));
+  const removeFromCart = (key) => {
+    setCart(cart.filter((item) => item.key !== key));
   };
 
   const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
@@ -221,17 +326,20 @@ export default function POS() {
 
     setLoading(true);
     try {
+      if (!saleIdemRef.current) saleIdemRef.current = newIdemKey();
       const res = await salesAPI.create({
         items: cart.filter((item) => item.quantity > 0).map((item) => ({
           product_id: item.product_id,
           quantity: item.quantity,
           uom_id: item.uom_id || null,
+          consignment_item_id: item.consignment_item_id || null,
         })),
         payment_method: paymentMethod,
         card_ref: paymentMethod === 'card' ? cardRef.trim() : null,
         register_id: registerId ? parseInt(registerId) : null,
         customer_id: selectedCustomer ? selectedCustomer.id : null,
-      });
+      }, saleIdemRef.current);
+      saleIdemRef.current = null;   // new key for the next, distinct sale
 
       setLastSale(res.data);
       setLastDonation(null);
@@ -241,6 +349,7 @@ export default function POS() {
       setCardRef('');
       setSelectedCustomer(null);
       loadProducts();
+      loadConsignLots();
       toast.success('تمت عملية البيع بنجاح');
     } catch (err) {
       toast.error(apiError(err, 'خطأ في عملية البيع'));
@@ -264,13 +373,15 @@ export default function POS() {
 
     setLoading(true);
     try {
+      if (!donationIdemRef.current) donationIdemRef.current = newIdemKey();
       const res = await donationsAPI.create({
         donor_name: donorName || null,
         amount,
         note: donationNote || null,
         payment_method: paymentMethod,
         card_ref: paymentMethod === 'card' ? donationCardRef.trim() : null,
-      });
+      }, donationIdemRef.current);
+      donationIdemRef.current = null;
 
       setLastDonation(res.data);
       setLastSale(null);
@@ -341,7 +452,17 @@ export default function POS() {
   };
 
   return (
-    <div className="flex gap-4 h-[calc(100vh-2rem)]">
+    <div className="flex flex-col gap-4 h-full min-h-0">
+      {addrIncomplete && !addrBannerDismissed && (
+        <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl px-4 py-3 text-sm">
+          <span className="flex-1">
+            لإصدار الفواتير الضريبية يجب إكمال بيانات <strong>العنوان الوطني</strong> في الإعدادات.
+          </span>
+          <Link to="/settings" className="font-medium underline hover:text-amber-900">فتح الإعدادات</Link>
+          <button onClick={() => setAddrBannerDismissed(true)} className="text-amber-500 hover:text-amber-700 px-1">✕</button>
+        </div>
+      )}
+      <div className="flex gap-4 flex-1 min-h-0">
       {/* Products Grid */}
       <div className="flex-1 flex flex-col">
         {/* Search + Donation button */}
@@ -352,11 +473,12 @@ export default function POS() {
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="ابحث عن منتج..."
+              onKeyDown={handleSearchKey}
+              placeholder="ابحث أو امسح باركود..."
               className="w-full pr-10 pl-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-bayan-green focus:border-transparent outline-none"
             />
           </div>
-          {posSettings.showDonation && (
+          {posSettings.showDonation && caps.donations_enabled && (
             <button
               onClick={() => setShowDonation(true)}
               className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-xl transition-all font-medium"
@@ -367,43 +489,33 @@ export default function POS() {
           )}
         </div>
 
-        {/* Products */}
-        <div className="flex-1 overflow-auto grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 content-start">
-          {filteredProducts.map((product) => (
-            <button
-              key={product.id}
-              onClick={() => addToCart(product)}
-              className="bg-white rounded-xl border border-gray-200 p-3 hover:shadow-lg hover:border-bayan-green transition-all text-center group"
-            >
-              {product.image_url ? (
-                <img
-                  src={product.image_url}
-                  alt={product.name}
-                  className="w-full h-24 object-cover rounded-lg mb-2"
-                />
-              ) : (
-                <div className="w-full h-24 bg-gray-100 rounded-lg mb-2 flex items-center justify-center">
-                  <span className="text-3xl text-gray-300">📦</span>
-                </div>
-              )}
-              <p className="font-medium text-gray-800 text-sm truncate">{product.name}</p>
-              <p className="text-bayan-green font-bold mt-1">{product.price.toFixed(2)} <SarIcon size={14} /></p>
-              <p className="text-xs text-gray-400 mt-1">المتبقي: {product.stock}</p>
-            </button>
-          ))}
-
-          {filteredProducts.length === 0 && (
-            <div className="col-span-full text-center py-16 text-gray-400">
+        {/* Products — grouped by category with sticky headers */}
+        <div className="flex-1 overflow-auto pr-1">
+          {groupedProducts.length === 0 ? (
+            <div className="text-center py-16 text-gray-400">
               <p className="text-4xl mb-2">📦</p>
               <p>لا توجد منتجات</p>
             </div>
+          ) : (
+            groupedProducts.map(([cat, items]) => (
+              <section key={cat} className="mb-4 last:mb-0">
+                <div className="sticky top-0 z-10 bg-gray-50/95 backdrop-blur-sm flex items-center gap-3 py-2 mb-2">
+                  <h3 className="text-xl font-extrabold text-gray-800 whitespace-nowrap">{cat}</h3>
+                  <span className="text-sm font-medium text-bayan-green bg-bayan-light px-2.5 py-0.5 rounded-full">{items.length}</span>
+                  <div className="flex-1 h-px bg-gray-200" />
+                </div>
+                <div className="pos-grid">
+                  {items.map((product) => renderProductCard(product))}
+                </div>
+              </section>
+            ))
           )}
         </div>
       </div>
 
       {/* Cart / Checkout */}
-      <div className="w-96 bg-white rounded-2xl shadow-lg border flex flex-col">
-        <div className="p-4 border-b">
+      <div className="w-80 xl:w-96 shrink-0 bg-white rounded-2xl shadow-lg border flex flex-col">
+        <div className="pos-cart-section p-4 border-b">
           <h2 className="text-lg font-bold text-gray-800">🛒 سلة المشتريات</h2>
         </div>
 
@@ -417,14 +529,14 @@ export default function POS() {
             </div>
           ) : (
             cart.map((item) => (
-              <div key={item.product_id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
+              <div key={item.key} className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
                 <div className="flex-1">
                   <p className="font-medium text-sm text-gray-800">{item.name}</p>
                   <p className="text-xs text-gray-500">{item.price.toFixed(2)} <SarIcon size={11} /></p>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => updateQuantity(item.product_id, -1)}
+                    onClick={() => updateQuantity(item.key, -1)}
                     className="w-7 h-7 rounded-full bg-gray-200 hover:bg-gray-300 flex items-center justify-center transition-all"
                   >
                     <HiOutlineMinus className="text-xs" />
@@ -434,12 +546,12 @@ export default function POS() {
                     step="any"
                     min="0"
                     value={item.quantity}
-                    onChange={(e) => setQuantity(item.product_id, e.target.value)}
+                    onChange={(e) => setQuantity(item.key, e.target.value)}
                     className="w-14 text-center font-bold text-sm rounded border border-gray-200 py-1 outline-none focus:ring-1 focus:ring-bayan-green"
                   />
                   {item.unit_name && <span className="text-xs text-gray-400 min-w-[2.5rem]">{item.unit_name}</span>}
                   <button
-                    onClick={() => updateQuantity(item.product_id, 1)}
+                    onClick={() => updateQuantity(item.key, 1)}
                     className="w-7 h-7 rounded-full bg-bayan-green hover:bg-bayan-dark text-white flex items-center justify-center transition-all"
                   >
                     <HiOutlinePlus className="text-xs" />
@@ -451,7 +563,7 @@ export default function POS() {
                   </p>
                 </div>
                 <button
-                  onClick={() => removeFromCart(item.product_id)}
+                  onClick={() => removeFromCart(item.key)}
                   className="text-red-400 hover:text-red-600 transition-all"
                 >
                   <HiOutlineTrash />
@@ -462,11 +574,11 @@ export default function POS() {
         </div>
 
         {/* Checkout Area */}
-        <div className="border-t p-4 space-y-3">
+        <div className="pos-cart-section border-t p-4 space-y-3">
           {/* Customer (optional) */}
           <div>
             {selectedCustomer ? (
-              <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+              <div className="flex items-center justify-between bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-2">
                 <div className="text-sm">
                   <span className="font-medium text-gray-800">{selectedCustomer.name}</span>
                   {selectedCustomer.phone && <span className="text-gray-500 mr-2">{selectedCustomer.phone}</span>}
@@ -626,6 +738,8 @@ export default function POS() {
           </button>
         </div>
       </div>
+
+      </div>{/* end two-column row */}
 
       {/* Donation Modal */}
       {showDonation && (

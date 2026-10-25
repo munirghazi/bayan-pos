@@ -6,6 +6,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from database import get_db, PurchaseOrder, PurchaseOrderLine, Supplier, Product, Uom, User
+from capabilities import require_purchasing
 from routers.auth import get_current_user, require_admin
 from routers.suppliers import require_compliant, supplier_compliance
 
@@ -113,7 +114,7 @@ def get_po(po_id: int, db: Session = Depends(get_db), user: User = Depends(get_c
 
 @router.post("/")
 def create_po(req: POCreate, db: Session = Depends(get_db),
-              user: User = Depends(require_admin)):
+              user: User = Depends(require_admin), _caps: dict = Depends(require_purchasing)):
     sup = db.query(Supplier).filter(Supplier.id == req.supplier_id,
                                     Supplier.is_active == True).first()  # noqa: E712
     if not sup:

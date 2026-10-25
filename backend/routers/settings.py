@@ -3,11 +3,11 @@ import glob
 import shutil
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from database import get_db, TenantSettings
+from database import get_db, TenantSettings, Tenant
 from routers.auth import get_current_user, require_admin, User
 
 router = APIRouter()
@@ -25,9 +25,24 @@ class TenantSettingsResponse(BaseModel):
     vat_rate: float = 15.0
     city: str | None = None
     country: str | None = None
+    building_number: str | None = None
+    street_name: str | None = None
+    district: str | None = None
+    postal_code: str | None = None
+    additional_number: str | None = None
+    region: str | None = None
     website: str | None = None
     logo_url: str | None = None
+    favicon_url: str | None = None
+    primary_color: str | None = None
+    accent_color: str | None = None
+    brand_name: str | None = None
+    font_family: str | None = None
+    ui_radius: str | None = None
+    receipt_footer: str | None = None
+    show_powered_by: bool = True
     payment_methods: str = "cash,card,transfer"
+    data_retention_months: int | None = None
     inventory_mode: str = "per_branch"
 
     class Config:
@@ -41,8 +56,22 @@ class TenantSettingsUpdate(BaseModel):
     vat_rate: float | None = None
     city: str | None = None
     country: str | None = None
+    building_number: str | None = None
+    street_name: str | None = None
+    district: str | None = None
+    postal_code: str | None = None
+    additional_number: str | None = None
+    region: str | None = None
     website: str | None = None
     payment_methods: str | None = None
+    favicon_url: str | None = None
+    primary_color: str | None = None
+    accent_color: str | None = None
+    brand_name: str | None = None
+    font_family: str | None = None
+    ui_radius: str | None = None
+    receipt_footer: str | None = None
+    data_retention_months: int | None = None
 
 
 def _get_or_create(db: Session) -> TenantSettings:
@@ -58,20 +87,56 @@ def _get_or_create(db: Session) -> TenantSettings:
 # ===================== Tenant profile =====================
 
 @router.get("/tenant", response_model=TenantSettingsResponse)
-def get_tenant_settings(db: Session = Depends(get_db),
+def get_tenant_settings(request: Request, db: Session = Depends(get_db),
                         current_user: User = Depends(get_current_user)):
-    return _get_or_create(db)
+    row = _get_or_create(db)
+    tid = getattr(request.state, "tenant_id", None)
+    return _settings_response(db, row, tid)
+
+
+def _settings_response(db, row, tid):
+    # Fall back to the identity captured at onboarding (tenants table) when the
+    # invoice settings haven't been filled in yet, so invoices are never blank.
+    t = db.query(Tenant).filter(Tenant.id == tid).first() if tid else None
+    return TenantSettingsResponse(
+        seller_name=row.seller_name or (t.name if t else None),
+        vat_number=row.vat_number or (t.vat_number if t else None),
+        national_address=row.national_address or (t.national_address if t else None),
+        vat_rate=row.vat_rate if row.vat_rate is not None else 15.0,
+        city=row.city,
+        country=row.country,
+        building_number=row.building_number,
+        street_name=row.street_name,
+        district=row.district,
+        postal_code=row.postal_code,
+        additional_number=row.additional_number,
+        region=row.region,
+        website=row.website,
+        logo_url=row.logo_url,
+        favicon_url=row.favicon_url,
+        primary_color=row.primary_color,
+        accent_color=row.accent_color,
+        brand_name=row.brand_name,
+        font_family=row.font_family,
+        ui_radius=row.ui_radius,
+        payment_methods=row.payment_methods or "cash,card,transfer",
+        data_retention_months=row.data_retention_months,
+        inventory_mode=row.inventory_mode or "per_branch",
+        receipt_footer=row.receipt_footer,
+        show_powered_by=(t.show_powered_by if t is not None else True),
+    )
 
 
 @router.put("/tenant", response_model=TenantSettingsResponse)
-def update_tenant_settings(req: TenantSettingsUpdate, db: Session = Depends(get_db),
+def update_tenant_settings(request: Request, req: TenantSettingsUpdate, db: Session = Depends(get_db),
                            current_user: User = Depends(require_admin)):
     row = _get_or_create(db)
     for field, value in req.model_dump(exclude_unset=True).items():
         setattr(row, field, value)
     db.commit()
     db.refresh(row)
-    return row
+    tid = getattr(request.state, "tenant_id", None)
+    return _settings_response(db, row, tid)
 
 
 # ===================== Per-tenant logo =====================

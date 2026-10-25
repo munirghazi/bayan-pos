@@ -80,10 +80,52 @@ export function generateZATCAQR({
  * Default store/charity settings for ZATCA
  */
 export const ZATCA_DEFAULTS = {
-  sellerName: 'جمعية بيان بمكة المكرمة',
-  vatNumber: '300000000000003', // Placeholder - update in Settings
-  vatRate: 0.15, // 15% VAT
+  sellerName: '',
+  vatNumber: '',
+  vatRate: 0.15, // 15% VAT (fraction)
+  nationalAddress: '',
+  city: '',
+  country: '',
+  buildingNumber: '',
+  streetName: '',
+  district: '',
+  postalCode: '',
+  additionalNumber: '',
+  region: '',
+  website: '',
+  receiptFooter: '',
+  showPoweredBy: true,
 };
+
+/**
+ * Sync invoice identity from the authoritative backend tenant settings
+ * (GET /settings/tenant) into the local ZATCA settings the receipt reads.
+ * Backend vat_rate is a percentage (e.g. 15) -> stored here as a fraction.
+ */
+export function syncZATCAFromTenant(t) {
+  if (!t) return getZATCASettings();
+  const vr = Number(t.vat_rate);
+  const mapped = {
+    sellerName: t.seller_name || '',
+    vatNumber: t.vat_number || '',
+    vatRate: Number.isNaN(vr) ? 0.15 : (vr > 1 ? vr / 100 : vr),
+    nationalAddress: t.national_address || '',
+    city: t.city || '',
+    country: t.country || '',
+    buildingNumber: t.building_number || '',
+    streetName: t.street_name || '',
+    district: t.district || '',
+    postalCode: t.postal_code || '',
+    additionalNumber: t.additional_number || '',
+    region: t.region || '',
+    website: t.website || '',
+    receiptFooter: t.receipt_footer || '',
+    showPoweredBy: t.show_powered_by !== false,
+  };
+  try { localStorage.setItem('show_powered_by', mapped.showPoweredBy ? '1' : '0'); } catch (e) {}
+  saveZATCASettings(mapped);
+  return mapped;
+}
 
 /**
  * Get ZATCA settings from localStorage or use defaults

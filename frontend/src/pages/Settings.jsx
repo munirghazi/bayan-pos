@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { authAPI, settingsAPI, locationsAPI, apiError } from '../services/api';
-import { getZATCASettings, saveZATCASettings } from '../utils/zatca';
-import { getPOSSettings, savePOSSettings } from '../utils/posSettings';
+import { getZATCASettings, saveZATCASettings, syncZATCAFromTenant } from '../utils/zatca';
+import { getPOSSettings, savePOSSettings, getCapabilities } from '../utils/posSettings';
 import toast from 'react-hot-toast';
+import { applyTheme, storeTheme, FONT_OPTIONS, RADIUS_OPTIONS } from '../utils/theme';
 import {
   HiOutlineUsers,
   HiOutlinePlus,
@@ -39,12 +40,14 @@ export default function Settings() {
   // Company profile & ZATCA settings combined
   const [profileForm, setProfileForm] = useState({
     sellerName: '', vatNumber: '', vatRate: 0.15, website: '', city: '', country: '',
+    buildingNumber: '', streetName: '', district: '', postalCode: '', additionalNumber: '', region: '',
   });
   const savingProfileRef = useRef(false);
 
   // POS settings
   const [posSettings, setPosSettings] = useState(getPOSSettings());
   const [logoPreview, setLogoPreview] = useState('');
+  const [brandForm, setBrandForm] = useState({ primaryColor: '#2254A4', accentColor: '#4DBA7F', brandName: '', faviconUrl: '', fontFamily: 'Cairo', uiRadius: 'default', receiptFooter: '' });
   const logoInputRef = useRef(null);
   const submittingRef = useRef(false);  // prevents duplicate submits
 
@@ -67,11 +70,37 @@ export default function Settings() {
         website: data.website || '',
         city: data.city || '',
         country: data.country || '',
+        buildingNumber: data.building_number || '',
+        streetName: data.street_name || '',
+        district: data.district || '',
+        postalCode: data.postal_code || '',
+        additionalNumber: data.additional_number || '',
+        region: data.region || '',
       };
       setProfileForm(form);
-      // keep the receipt/ZATCA-QR cache in sync with THIS tenant
-      saveZATCASettings({ sellerName: form.sellerName, vatNumber: form.vatNumber, vatRate: form.vatRate });
+      // keep the receipt/ZATCA-QR cache in sync with THIS tenant (full identity)
+      syncZATCAFromTenant(data);
       localStorage.setItem('tenant_logo', data.logo_url || '');
+      setBrandForm({
+        primaryColor: data.primary_color || '#2254A4',
+        accentColor: data.accent_color || '#4DBA7F',
+        brandName: data.brand_name || '',
+        faviconUrl: data.favicon_url || '',
+        fontFamily: data.font_family || 'Cairo',
+        uiRadius: data.ui_radius || 'default',
+        receiptFooter: data.receipt_footer || '',
+      });
+      // payment methods are tenant-level (backend). Mirror onto the device settings
+      // so the POS payment options reflect the tenant configuration.
+      if (typeof data.payment_methods === 'string' && data.payment_methods.length) {
+        const enabled = data.payment_methods.split(',').map((x) => x.trim()).filter(Boolean);
+        const pm = { cash: enabled.includes('cash'), card: enabled.includes('card'), transfer: enabled.includes('transfer') };
+        setPosSettings((prev) => {
+          const next = { ...prev, paymentMethods: pm };
+          savePOSSettings(next);
+          return next;
+        });
+      }
     } catch (err) {}
   };
 
@@ -197,9 +226,19 @@ export default function Settings() {
   };
 
   const handleSaveProfile = async () => {
-    if (!profileForm.vatNumber || profileForm.vatNumber.length !== 15) {
-      toast.error('الرقم الضريبي يجب أن يكون 15 رقم');
-      return;
+    const caps = getCapabilities();
+    const needsInvoice = !!caps.sales_enabled;   // trade / mixed
+    const t = (v) => (v || '').trim();
+    if (needsInvoice) {
+      if (!/^\d{15}$/.test(t(profileForm.vatNumber))) { toast.error('الرقم الضريبي يجب أن يكون 15 رقم'); return; }
+      if (!/^\d{4}$/.test(t(profileForm.buildingNumber))) { toast.error('رقم المبنى يجب أن يكون 4 أرقام'); return; }
+      if (!t(profileForm.streetName)) { toast.error('اسم الشارع مطلوب'); return; }
+      if (!t(profileForm.district)) { toast.error('الحي مطلوب'); return; }
+      if (!t(profileForm.city)) { toast.error('المدينة مطلوبة'); return; }
+      if (!/^\d{5}$/.test(t(profileForm.postalCode))) { toast.error('الرمز البريدي يجب أن يكون 5 أرقام'); return; }
+      if (t(profileForm.additionalNumber) && !/^\d{4}$/.test(t(profileForm.additionalNumber))) { toast.error('الرقم الإضافي يجب أن يكون 4 أرقام'); return; }
+    } else if (profileForm.vatNumber && profileForm.vatNumber.length !== 15) {
+      toast.error('الرقم الضريبي يجب أن يكون 15 رقم'); return;
     }
     if (savingProfileRef.current) return;
     savingProfileRef.current = true;
@@ -211,14 +250,56 @@ export default function Settings() {
         website: profileForm.website,
         city: profileForm.city,
         country: profileForm.country,
+        building_number: profileForm.buildingNumber,
+        street_name: profileForm.streetName,
+        district: profileForm.district,
+        postal_code: profileForm.postalCode,
+        additional_number: profileForm.additionalNumber,
+        region: profileForm.region,
       });
-      saveZATCASettings({ sellerName: profileForm.sellerName, vatNumber: profileForm.vatNumber, vatRate: profileForm.vatRate });
+      // resync the receipt/QR identity cache from the saved values
+      syncZATCAFromTenant({
+        seller_name: profileForm.sellerName, vat_number: profileForm.vatNumber,
+        vat_rate: Math.round((profileForm.vatRate || 0) * 100),
+        national_address: '', city: profileForm.city, country: profileForm.country,
+        building_number: profileForm.buildingNumber, street_name: profileForm.streetName,
+        district: profileForm.district, postal_code: profileForm.postalCode,
+        additional_number: profileForm.additionalNumber, region: profileForm.region,
+        website: profileForm.website,
+      });
       toast.success('تم حفظ بيانات الجمعية');
     } catch (err) {
       toast.error(err.response?.data?.detail || 'خطأ في الحفظ');
     } finally {
       savingProfileRef.current = false;
     }
+  };
+
+  const saveBranding = async () => {
+    const hex = /^#[0-9a-fA-F]{6}$/;
+    if (!hex.test(brandForm.primaryColor) || !hex.test(brandForm.accentColor)) {
+      toast.error('صيغة اللون غير صحيحة (#RRGGBB)');
+      return;
+    }
+    try {
+      await settingsAPI.updateTenant({
+        primary_color: brandForm.primaryColor,
+        accent_color: brandForm.accentColor,
+        brand_name: brandForm.brandName || null,
+        favicon_url: brandForm.faviconUrl || null,
+        font_family: brandForm.fontFamily || null,
+        ui_radius: brandForm.uiRadius || null,
+        receipt_footer: brandForm.receiptFooter || null,
+      });
+      const applied = {
+        primary_color: brandForm.primaryColor, accent_color: brandForm.accentColor,
+        brand_name: brandForm.brandName, favicon_url: brandForm.faviconUrl,
+        font_family: brandForm.fontFamily, ui_radius: brandForm.uiRadius,
+        receipt_footer: brandForm.receiptFooter,
+      };
+      applyTheme(applied); storeTheme(applied);
+      toast.success('تم حفظ الهوية البصرية');
+    } catch (e) { toast.error(apiError(e, 'تعذر حفظ الهوية')); }
   };
 
   if (loading) {
@@ -386,6 +467,62 @@ export default function Settings() {
               </div>
             </div>
 
+            {/* National address (ZATCA) */}
+            <div className="pt-4 mt-2 border-t">
+              <h4 className="text-sm font-bold text-gray-700">العنوان الوطني (حسب هيئة الزكاة والضريبة والجمارك)</h4>
+              <p className="text-xs text-gray-400 mb-4">مطلوب لإصدار الفواتير الضريبية للجهات التجارية</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">رقم المبنى (4 أرقام)</label>
+                  <input type="text" dir="ltr" maxLength={4}
+                    value={profileForm.buildingNumber}
+                    onChange={(e) => setProfileForm({ ...profileForm, buildingNumber: e.target.value.replace(/\D/g, '') })}
+                    className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none"
+                    placeholder="1234" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">اسم الشارع</label>
+                  <input type="text"
+                    value={profileForm.streetName}
+                    onChange={(e) => setProfileForm({ ...profileForm, streetName: e.target.value })}
+                    className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none"
+                    placeholder="طريق الملك عبدالعزيز" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">الحي</label>
+                  <input type="text"
+                    value={profileForm.district}
+                    onChange={(e) => setProfileForm({ ...profileForm, district: e.target.value })}
+                    className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none"
+                    placeholder="النسيم" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">الرمز البريدي (5 أرقام)</label>
+                  <input type="text" dir="ltr" maxLength={5}
+                    value={profileForm.postalCode}
+                    onChange={(e) => setProfileForm({ ...profileForm, postalCode: e.target.value.replace(/\D/g, '') })}
+                    className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none"
+                    placeholder="24231" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">الرقم الإضافي (4 أرقام)</label>
+                  <input type="text" dir="ltr" maxLength={4}
+                    value={profileForm.additionalNumber}
+                    onChange={(e) => setProfileForm({ ...profileForm, additionalNumber: e.target.value.replace(/\D/g, '') })}
+                    className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none"
+                    placeholder="9013" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">المنطقة</label>
+                  <input type="text"
+                    value={profileForm.region}
+                    onChange={(e) => setProfileForm({ ...profileForm, region: e.target.value })}
+                    className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none"
+                    placeholder="مكة المكرمة" />
+                </div>
+              </div>
+            </div>
+
             {/* Save button */}
             <div className="flex justify-end pt-2 border-t">
               <button
@@ -457,6 +594,87 @@ export default function Settings() {
             </div>
           </div>
 
+          {/* Branding / white-label */}
+          <div className="bg-white rounded-xl border p-6 space-y-4">
+            <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+              <HiOutlinePhotograph className="text-bayan-green" />
+              الهوية البصرية (الألوان)
+            </h2>
+            <p className="text-sm text-gray-500">تُطبَّق ألوان الجهة على الواجهة والفواتير. المعاينة فورية.</p>
+            <div className="grid sm:grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm text-gray-600">اللون الأساسي</label>
+                <div className="flex items-center gap-2 mt-1">
+                  <input type="color" value={brandForm.primaryColor}
+                    onChange={(e) => { const v = { ...brandForm, primaryColor: e.target.value }; setBrandForm(v); applyTheme({ primary_color: v.primaryColor, accent_color: v.accentColor }); }}
+                    className="w-12 h-10 rounded border border-gray-300 cursor-pointer" />
+                  <input type="text" dir="ltr" value={brandForm.primaryColor}
+                    onChange={(e) => setBrandForm({ ...brandForm, primaryColor: e.target.value })}
+                    className="flex-1 px-3 py-2 rounded-lg border border-gray-300 outline-none focus:ring-2 focus:ring-bayan-green text-left" />
+                </div>
+              </div>
+              <div>
+                <label className="text-sm text-gray-600">اللون المميّز (Accent)</label>
+                <div className="flex items-center gap-2 mt-1">
+                  <input type="color" value={brandForm.accentColor}
+                    onChange={(e) => { const v = { ...brandForm, accentColor: e.target.value }; setBrandForm(v); applyTheme({ primary_color: v.primaryColor, accent_color: v.accentColor }); }}
+                    className="w-12 h-10 rounded border border-gray-300 cursor-pointer" />
+                  <input type="text" dir="ltr" value={brandForm.accentColor}
+                    onChange={(e) => setBrandForm({ ...brandForm, accentColor: e.target.value })}
+                    className="flex-1 px-3 py-2 rounded-lg border border-gray-300 outline-none focus:ring-2 focus:ring-bayan-green text-left" />
+                </div>
+              </div>
+              <div>
+                <label className="text-sm text-gray-600">اسم العرض (اختياري)</label>
+                <input type="text" value={brandForm.brandName}
+                  onChange={(e) => setBrandForm({ ...brandForm, brandName: e.target.value })}
+                  placeholder="يظهر في عنوان المتصفح"
+                  className="w-full mt-1 px-3 py-2 rounded-lg border border-gray-300 outline-none focus:ring-2 focus:ring-bayan-green" />
+              </div>
+              <div>
+                <label className="text-sm text-gray-600">رابط الأيقونة (Favicon، اختياري)</label>
+                <input type="text" dir="ltr" value={brandForm.faviconUrl}
+                  onChange={(e) => setBrandForm({ ...brandForm, faviconUrl: e.target.value })}
+                  placeholder="https://.../favicon.svg"
+                  className="w-full mt-1 px-3 py-2 rounded-lg border border-gray-300 outline-none focus:ring-2 focus:ring-bayan-green text-left" />
+              </div>
+              <div>
+                <label className="text-sm text-gray-600">الخط</label>
+                <select value={brandForm.fontFamily}
+                  onChange={(e) => { const v = { ...brandForm, fontFamily: e.target.value }; setBrandForm(v); applyTheme({ font_family: v.fontFamily }); }}
+                  className="w-full mt-1 px-3 py-2 rounded-lg border border-gray-300 outline-none focus:ring-2 focus:ring-bayan-green bg-white">
+                  {FONT_OPTIONS.map((f) => <option key={f} value={f}>{f}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-sm text-gray-600">انحناء الحواف</label>
+                <select value={brandForm.uiRadius}
+                  onChange={(e) => { const v = { ...brandForm, uiRadius: e.target.value }; setBrandForm(v); applyTheme({ ui_radius: v.uiRadius }); }}
+                  className="w-full mt-1 px-3 py-2 rounded-lg border border-gray-300 outline-none focus:ring-2 focus:ring-bayan-green bg-white">
+                  {RADIUS_OPTIONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                </select>
+              </div>
+              <div className="sm:col-span-2">
+                <label className="text-sm text-gray-600">نص أسفل الفاتورة (اختياري)</label>
+                <textarea value={brandForm.receiptFooter} rows={2}
+                  onChange={(e) => setBrandForm({ ...brandForm, receiptFooter: e.target.value })}
+                  placeholder="مثال: شكراً لتعاملكم — سياسة الإرجاع خلال ٧ أيام"
+                  className="w-full mt-1 px-3 py-2 rounded-lg border border-gray-300 outline-none focus:ring-2 focus:ring-bayan-green" />
+              </div>
+            </div>
+            <div className="flex items-center gap-3 pt-2">
+              <button onClick={saveBranding}
+                className="bg-bayan-green hover:bg-bayan-dark text-white px-6 py-2 rounded-lg transition-all">حفظ الهوية</button>
+              <button onClick={() => { const d = { primaryColor: '#2254A4', accentColor: '#4DBA7F', brandName: '', faviconUrl: '' }; setBrandForm(d); applyTheme({ primary_color: d.primaryColor, accent_color: d.accentColor }); }}
+                className="text-sm text-gray-500 hover:text-gray-700">إعادة للافتراضي</button>
+              <div className="flex items-center gap-2 ms-auto">
+                <span className="text-xs text-gray-400">معاينة:</span>
+                <span className="px-3 py-1 rounded-lg bg-bayan-green text-white text-sm">أساسي</span>
+                <span className="px-3 py-1 rounded-lg bg-bayan-gold text-white text-sm">مميّز</span>
+              </div>
+            </div>
+          </div>
+
           {/* Payment Methods */}
           <div className="bg-white rounded-xl border p-6 space-y-4">
             <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
@@ -484,19 +702,19 @@ export default function Settings() {
                       type="checkbox"
                       checked={posSettings.paymentMethods[key]}
                       onChange={(e) => {
-                        const updated = {
-                          ...posSettings,
-                          paymentMethods: {
-                            ...posSettings.paymentMethods,
-                            [key]: e.target.checked,
-                          },
-                        };
-                        const enabledCount = Object.values(updated.paymentMethods).filter(Boolean).length;
-                        if (enabledCount === 0) {
+                        const methods = { ...posSettings.paymentMethods, [key]: e.target.checked };
+                        const enabledKeys = Object.keys(methods).filter((k) => methods[k]);
+                        if (enabledKeys.length === 0) {
                           toast.error('يجب تفعيل طريقة دفع واحدة على الأقل');
                           return;
                         }
+                        const updated = { ...posSettings, paymentMethods: methods };
                         setPosSettings(updated);
+                        savePOSSettings(updated);
+                        // persist at tenant level (backend) so it applies across devices
+                        settingsAPI.updateTenant({ payment_methods: enabledKeys.join(',') })
+                          .then(() => toast.success('تم تحديث طرق الدفع'))
+                          .catch(() => toast.error('تعذر حفظ طرق الدفع'));
                       }}
                       className="w-5 h-5 text-bayan-green rounded focus:ring-bayan-green"
                     />

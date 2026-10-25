@@ -155,6 +155,27 @@ def _validate_uoms(db, uom_id, purchase_uom_id, sales_uom_id):
                                     detail=f"{label} يجب أن تكون من نفس فئة الوحدة الأساسية")
 
 
+class EnsureBarcodes(BaseModel):
+    product_ids: list[int]
+
+
+@router.post("/ensure-barcodes")
+def ensure_barcodes(req: EnsureBarcodes, db: Session = Depends(get_db),
+                    current_user: User = Depends(require_admin)):
+    """Ensure each product has a barcode (generate + save PR######## when empty).
+    Returns id/name/barcode/price for label printing."""
+    out = []
+    for pid in req.product_ids:
+        prod = db.query(Product).filter(Product.id == pid).first()
+        if not prod:
+            continue
+        if not prod.barcode:
+            prod.barcode = f"PR{prod.id:08d}"
+        out.append({"id": prod.id, "name": prod.name, "barcode": prod.barcode, "price": prod.price})
+    db.commit()
+    return out
+
+
 def _serialize(db: Session, product: Product) -> dict:
     comps = []
     if product.is_kit:
@@ -233,13 +254,13 @@ def delete_category(category_id: int, db: Session = Depends(get_db), current_use
 
 @router.get("/", response_model=list[ProductResponse])
 def get_products(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    return [_serialize(db, p) for p in db.query(Product).filter(Product.is_active == True).all()]
+    return [_serialize(db, p) for p in db.query(Product).filter(Product.is_active == True, Product.is_consignment == False).all()]
 
 
 @router.get("/all", response_model=list[ProductResponse])
 def get_all_products(include_inactive: bool = False, db: Session = Depends(get_db),
                      current_user: User = Depends(require_admin)):
-    q = db.query(Product)
+    q = db.query(Product).filter(Product.is_consignment == False)
     if not include_inactive:
         q = q.filter(Product.is_active == True)  # noqa: E712
     return [_serialize(db, p) for p in q.all()]

@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from database import (get_db, GoodsReceipt, GoodsReceiptLine, PurchaseOrder,
                       PurchaseOrderLine, Product, User)
+from capabilities import require_purchasing
 from routers.auth import get_current_user, require_admin
 from stock import record_movement, to_base_qty
 
@@ -58,7 +59,7 @@ def get_receipt(receipt_id: int, db: Session = Depends(get_db),
 
 @router.post("/")
 def create_receipt(req: ReceiptCreate, db: Session = Depends(get_db),
-                   user: User = Depends(require_admin)):
+                   user: User = Depends(require_admin), _caps: dict = Depends(require_purchasing)):
     po = db.query(PurchaseOrder).filter(PurchaseOrder.id == req.po_id).first()
     if not po:
         raise HTTPException(status_code=404, detail="أمر الشراء غير موجود")

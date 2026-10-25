@@ -1,4 +1,6 @@
 import os
+import time
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -10,8 +12,24 @@ from passlib.context import CryptContext
 from sqlalchemy import text
 
 from config import settings
-from database import SessionLocal, Tenant, TenantSettings, User, ensure_default_branch, ensure_default_uom
-from routers import auth, products, sales, donations, reports, locations, customers, returns, delivery, suppliers, uom, stock, purchase_orders, goods_receipts, settings as settings_router
+
+# ---- Observability (Wave 2): structured logging + lightweight metrics ----
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s %(levelname)s %(name)s %(message)s')
+access_logger = logging.getLogger("alkashi.access")
+
+_METRICS = {"requests_total": 0, "by_status_class": {}, "slow_requests": 0}
+_SLOW_MS = 1000.0
+
+def _record_metric(status_code: int, dur_ms: float):
+    _METRICS["requests_total"] += 1
+    k = f"{status_code // 100}xx"
+    _METRICS["by_status_class"][k] = _METRICS["by_status_class"].get(k, 0) + 1
+    if dur_ms >= _SLOW_MS:
+        _METRICS["slow_requests"] += 1
+from database import SessionLocal, Tenant, TenantSettings, User, ensure_default_branch, ensure_default_uom, engine
+from routers import auth, products, sales, donations, reports, locations, customers, returns, delivery, suppliers, uom, stock, purchase_orders, goods_receipts, privacy, consignment, settings as settings_router
 
 
 def bootstrap():
@@ -32,7 +50,12 @@ def bootstrap():
                    {"t": str(tenant.id)})
 
         if not db.query(TenantSettings).filter(TenantSettings.tenant_id == tenant.id).first():
-            db.add(TenantSettings(tenant_id=tenant.id, seller_name=tenant.name))
+            db.add(TenantSettings(
+                tenant_id=tenant.id, seller_name=tenant.name,
+                vat_number="300000000000003",
+                building_number="1234", street_name="طريق الملك عبدالعزيز",
+                district="النسيم", city="مكة المكرمة", postal_code="24231",
+                additional_number="9013", country="SA"))
             db.commit()
 
         if settings.bootstrap_admin_password:
@@ -75,9 +98,34 @@ os.makedirs("uploads", exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 
+@app.middleware("http")
+async def _timing_middleware(request: Request, call_next):
+    start = time.perf_counter()
+    response = await call_next(request)
+    dur_ms = (time.perf_counter() - start) * 1000
+    response.headers["X-Process-Time-ms"] = f"{dur_ms:.1f}"
+    _record_metric(response.status_code, dur_ms)
+    access_logger.info("%s %s %s %.1fms", request.method, request.url.path,
+                       response.status_code, dur_ms)
+    return response
+
+
 @app.get("/health")
 def health():
-    return {"status": "ok", "environment": settings.environment}
+    db_ok = True
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception:
+        db_ok = False
+    return {"status": "ok" if db_ok else "degraded",
+            "database": "up" if db_ok else "down",
+            "environment": settings.environment}
+
+
+@app.get("/metrics")
+def metrics():
+    return _METRICS
 
 
 app.include_router(auth.router, prefix="/api/auth", tags=["المصادقة"])
@@ -89,12 +137,14 @@ app.include_router(locations.router, prefix="/api/locations", tags=["الفرو�
 app.include_router(locations.registers_router, prefix="/api/registers", tags=["الصناديق"])
 app.include_router(customers.router, prefix="/api/customers", tags=["العملاء"])
 app.include_router(returns.router, prefix="/api/returns", tags=["المرتجعات"])
+app.include_router(consignment.router, prefix="/api/consignment", tags=["consignment"])
 app.include_router(delivery.router, prefix="/api/delivery", tags=["الإرسال"])
 app.include_router(suppliers.router, prefix="/api/suppliers", tags=["الموردون"])
 app.include_router(uom.router, prefix="/api/uom", tags=["وحدات القياس"])
 app.include_router(stock.router, prefix="/api/stock", tags=["المخزون"])
 app.include_router(purchase_orders.router, prefix="/api/purchase-orders", tags=["أوامر الشراء"])
 app.include_router(goods_receipts.router, prefix="/api/goods-receipts", tags=["سندات الاستلام"])
+app.include_router(privacy.router, prefix="/api/privacy", tags=["الخصوصية"])
 app.include_router(settings_router.router, prefix="/api/settings", tags=["الإعدادات"])
 
 # --- Serve frontend build in production ---

@@ -4,7 +4,8 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from database import get_db, Sale, SaleItem, Product, Return, ReturnItem
-from routers.auth import get_current_user, User
+from routers.auth import get_current_user, require_admin, User
+from tenant_audit import tenant_audit
 from kits import explode_to_leaves
 from stock import record_movement, to_base_qty
 
@@ -99,7 +100,7 @@ def get_return(return_id: int, db: Session = Depends(get_db),
 
 @router.post("/")
 def create_return(req: ReturnCreate, db: Session = Depends(get_db),
-                  user: User = Depends(get_current_user)):
+                  user: User = Depends(require_admin)):
     if not req.items:
         raise HTTPException(status_code=400, detail="يجب تحديد صنف واحد على الأقل")
 
@@ -157,4 +158,5 @@ def create_return(req: ReturnCreate, db: Session = Depends(get_db),
 
     db.commit()
     db.refresh(ret)
+    tenant_audit(db, user, "refund", target=getattr(ret, 'id', None))
     return _format_return(ret)

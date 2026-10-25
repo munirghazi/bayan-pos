@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 * {
-  font-family: 'Cairo', sans-serif;
+  font-family: var(--brand-font, 'Cairo'), sans-serif;
 }
 
 body {
@@ -48,4 +48,50 @@ input[type="number"]::-webkit-outer-spin-button {
 
 input[type="number"] {
   -moz-appearance: textfield;
+}
+
+/* ===========================================================
+   POS terminal compatibility — landscape touch screens
+   Tuned for EZPOS 004-15 (15", 1366x768) and robust to Windows
+   display scaling (125% / 150%), which shrinks the effective
+   viewport. Goal: the product grid and the cart (with its total
+   and Pay button) always fit on screen with no page scrolling.
+   =========================================================== */
+
+/* Never scroll the whole shell sideways on a fixed terminal. */
+html, body { overflow-x: hidden; }
+
+/* Product grid keys off the pane's OWN width, not the viewport, so
+   the column count stays sensible regardless of the sidebar width
+   or the OS display-scaling factor. */
+.pos-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 0.75rem;
+  align-content: start;
+}
+
+/* Comfortable touch feedback on the product tiles. */
+.pos-card { transition: box-shadow .15s, border-color .15s, transform .05s; }
+.pos-card:active { transform: scale(0.98); }
+
+/* --- Density mode: short viewports (≈768px tall, or scaled) --- */
+@media (max-height: 820px) {
+  /* Reclaim the shell padding around the page. */
+  .app-main { padding: 0.75rem !important; }
+
+  /* More, smaller tiles; tighter gaps. */
+  .pos-grid { grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 0.5rem; }
+  .pos-card { padding: 0.5rem !important; }
+  .pos-card-img { height: 3.25rem !important; margin-bottom: 0.375rem !important; }
+
+  /* Tighten the cart header + checkout footer so the total and the
+     Pay button never get pushed off the bottom. */
+  .pos-cart-section { padding: 0.625rem 0.75rem !important; }
+}
+
+/* Very short (150% scaling ≈ 512px tall): squeeze a little further. */
+@media (max-height: 560px) {
+  .pos-grid { grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); }
+  .pos-card-img { height: 2.5rem !important; }
 }

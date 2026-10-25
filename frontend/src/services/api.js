@@ -30,6 +30,7 @@ export const authAPI = {
   login: (username, password, tenant) => api.post('/auth/login', { username, password, tenant }),
   logout: () => api.post('/auth/logout'),
   getMe: () => api.get('/auth/me'),
+  getCapabilities: () => api.get('/auth/capabilities'),
   getUsers: () => api.get('/auth/users'),
   createUser: (data) => api.post('/auth/users', data),
   updateUser: (id, data) => api.put(`/auth/users/${id}`, data),
@@ -38,6 +39,7 @@ export const authAPI = {
 
 // ===================== Products =====================
 export const productsAPI = {
+  ensureBarcodes: (product_ids) => api.post('/products/ensure-barcodes', { product_ids }),
   getAll: () => api.get('/products/'),
   getAllAdmin: () => api.get('/products/all'),
   get: (id) => api.get(`/products/${id}`),
@@ -60,14 +62,14 @@ export const productsAPI = {
 
 // ===================== Sales =====================
 export const salesAPI = {
-  create: (data) => api.post('/sales/', data),
+  create: (data, idemKey) => api.post('/sales/', data, idemKey ? { headers: { 'Idempotency-Key': idemKey } } : undefined),
   getAll: (skip = 0, limit = 50) => api.get(`/sales/?skip=${skip}&limit=${limit}`),
   get: (id) => api.get(`/sales/${id}`),
 };
 
 // ===================== Donations =====================
 export const donationsAPI = {
-  create: (data) => api.post('/donations/', data),
+  create: (data, idemKey) => api.post('/donations/', data, idemKey ? { headers: { 'Idempotency-Key': idemKey } } : undefined),
   getAll: (skip = 0, limit = 50) => api.get(`/donations/?skip=${skip}&limit=${limit}`),
   get: (id) => api.get(`/donations/${id}`),
   delete: (id) => api.delete(`/donations/${id}`),
@@ -117,6 +119,9 @@ export const registersAPI = {
   create: (data) => api.post('/registers/', data),
   update: (id, data) => api.put(`/registers/${id}`, data),
   delete: (id) => api.delete(`/registers/${id}`),
+  zreport: (id) => api.get(`/registers/${id}/z-report`),
+  close: (id, data) => api.post(`/registers/${id}/close`, data),
+  closings: (id) => api.get(`/registers/${id}/closings`),
 };
 
 export const customersAPI = {
@@ -131,6 +136,28 @@ export const customersAPI = {
 // - string detail (our HTTPException messages)
 // - list detail (FastAPI 422 validation) -> joined field messages
 // - no response (dropped connection / server down) -> clear connectivity message
+export const privacyAPI = {
+  exportCustomer: (id) => api.get(`/privacy/customer/${id}/export`),
+  eraseCustomer: (id) => api.post(`/privacy/customer/${id}/erase`),
+  eraseDonor: (name) => api.post('/privacy/donor/erase', { name }),
+  retentionPreview: (months) => api.get('/privacy/retention/preview' + (months ? `?months=${months}` : '')),
+  retentionApply: (months) => api.post('/privacy/retention/apply' + (months ? `?months=${months}` : '')),
+};
+
+export const consignmentAPI = {
+  getConsignors: () => api.get('/consignment/consignors'),
+  createConsignor: (data) => api.post('/consignment/consignors', data),
+  updateConsignor: (id, data) => api.put(`/consignment/consignors/${id}`, data),
+  createIntake: (data) => api.post('/consignment/intake', data),
+  getStock: (consignorId) => api.get('/consignment/stock' + (consignorId ? `?consignor_id=${consignorId}` : '')),
+  getStatement: (id) => api.get(`/consignment/consignors/${id}/statement`),
+  createPayout: (data) => api.post('/consignment/payout', data),
+  getReport: () => api.get('/consignment/report'),
+  lookup: (code) => api.get(`/consignment/lookup?code=${encodeURIComponent(code)}`),
+  returnItem: (data) => api.post('/consignment/return', data),
+  getAging: () => api.get('/consignment/aging'),
+};
+
 export const returnsAPI = {
   getForSale: (saleId) => api.get(`/returns/sale/${saleId}`),
   getAll: () => api.get('/returns/'),

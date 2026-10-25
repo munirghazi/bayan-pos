@@ -68,9 +68,28 @@ const Receipt = forwardRef(({ sale, type = 'sale', donation = null }, ref) => {
             style={{ maxHeight: '64px', maxWidth: '180px', margin: '0 auto 8px', objectFit: 'contain' }}
           />
         )}
-        <h2 className="text-lg font-bold text-gray-800">{zatca.sellerName || 'جمعية بيان بمكة المكرمة'}</h2>
-        <p className="text-gray-500 text-xs mt-1">www.bayanmakkah.org.sa</p>
-        <p className="text-gray-500 text-xs">مكة المكرمة - المملكة العربية السعودية</p>
+        <h2 className="text-lg font-bold text-gray-800">{zatca.sellerName || '— يرجى ضبط بيانات الجهة في الإعدادات —'}</h2>
+        {zatca.website && (
+          <p className="text-gray-500 text-xs mt-1">{zatca.website}</p>
+        )}
+        {[zatca.buildingNumber, zatca.streetName].filter(Boolean).length > 0 && (
+          <p className="text-gray-500 text-xs mt-1">
+            {[zatca.buildingNumber, zatca.streetName].filter(Boolean).join(' ')}
+          </p>
+        )}
+        {[zatca.district, zatca.city, zatca.postalCode].filter(Boolean).length > 0 && (
+          <p className="text-gray-500 text-xs">
+            {[zatca.district, zatca.city, zatca.postalCode].filter(Boolean).join('، ')}
+          </p>
+        )}
+        {[zatca.region, zatca.country].filter(Boolean).length > 0 && (
+          <p className="text-gray-500 text-xs">
+            {[zatca.region, zatca.country].filter(Boolean).join('، ')}
+          </p>
+        )}
+        {!zatca.buildingNumber && zatca.nationalAddress && (
+          <p className="text-gray-500 text-xs">{zatca.nationalAddress}</p>
+        )}
         {zatca.vatNumber && (
           <p className="text-gray-500 text-xs mt-1">الرقم الضريبي: {zatca.vatNumber}</p>
         )}
@@ -220,7 +239,13 @@ const Receipt = forwardRef(({ sale, type = 'sale', donation = null }, ref) => {
       {/* Footer */}
       <div className="text-center mt-6 pt-4 border-t-2 border-dashed border-gray-400">
         <p className="text-xs text-gray-500">جزاكم الله خيراً</p>
+        {zatca.receiptFooter && (
+          <p className="text-xs text-gray-500 mt-1 whitespace-pre-line">{zatca.receiptFooter}</p>
+        )}
         <p className="text-xs text-gray-400 mt-1">{now.toLocaleString('ar-SA')}</p>
+        {zatca.showPoweredBy !== false && (
+          <p className="text-[10px] text-gray-300 mt-2">مشغّل بواسطة سهل</p>
+        )}
       </div>
     </div>
   );

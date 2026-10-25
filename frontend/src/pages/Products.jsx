@@ -1,5 +1,7 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { productsAPI, suppliersAPI, uomAPI, apiError } from '../services/api';
+import PrintLabelsModal from '../components/PrintLabelsModal';
+import { Button, EmptyState } from '../components/ui';
 import { SarIcon } from '../components/SarIcon';
 import toast from 'react-hot-toast';
 import {
@@ -8,9 +10,10 @@ import {
   HiOutlineTrash,
   HiOutlinePhotograph,
   HiOutlineTag,
+  HiOutlinePrinter,
 } from 'react-icons/hi';
 
-export default function Products() {
+export default function Products({ embedded = false }) {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
@@ -40,6 +43,8 @@ export default function Products() {
     sales_uom_id: '',
     image_url: '',
     is_tax_exempt: false,
+    is_kit: false,
+    components: [],
   });
 
   const user = JSON.parse(localStorage.getItem('user') || '{}');
@@ -91,6 +96,12 @@ export default function Products() {
         sales_uom_id: form.sales_uom_id ? parseInt(form.sales_uom_id) : null,
         image_url: form.image_url || null,
         is_tax_exempt: form.is_tax_exempt,
+        is_kit: form.is_kit,
+        components: form.is_kit
+          ? form.components
+              .filter((c) => c.product_id && parseFloat(c.quantity) > 0)
+              .map((c) => ({ product_id: parseInt(c.product_id), quantity: parseFloat(c.quantity) }))
+          : null,
       };
 
       if (editingProduct) {
@@ -108,6 +119,29 @@ export default function Products() {
     } finally {
       submittingRef.current = false;
     }
+  };
+
+  const [printItems, setPrintItems] = useState(null);
+
+  const groupedProducts = useMemo(() => {
+    const map = {};
+    products.forEach((pr) => {
+      const key = pr.category?.name || 'بدون تصنيف';
+      (map[key] = map[key] || []).push(pr);
+    });
+    return Object.entries(map).sort((a, b) => {
+      if (a[0] === 'بدون تصنيف') return 1;
+      if (b[0] === 'بدون تصنيف') return -1;
+      return a[0].localeCompare(b[0], 'ar');
+    });
+  }, [products]);
+
+  const printLabels = async (ids) => {
+    try {
+      const { data } = await productsAPI.ensureBarcodes(ids);
+      if (!data.length) { toast.error('لا أصناف للطباعة'); return; }
+      setPrintItems(data.map((d) => ({ name: d.name, barcode: d.barcode, price: d.price, qty: 1 })));
+    } catch (e) { toast.error(apiError(e, 'تعذّر تجهيز الباركود')); }
   };
 
   const handleDelete = async (id) => {
@@ -139,12 +173,16 @@ export default function Products() {
       sales_uom_id: product.sales_uom_id?.toString() || '',
       image_url: product.image_url || '',
       is_tax_exempt: product.is_tax_exempt || false,
+      is_kit: product.is_kit || false,
+      components: (product.components || []).map((c) => ({
+        product_id: c.product_id.toString(), quantity: c.quantity.toString(),
+      })),
     });
     setShowForm(true);
   };
 
   const resetForm = () => {
-    setForm({ name: '', price: '', category_id: '', stock: '', barcode: '', cost_price: '', unit: '', reorder_level: '', default_supplier_id: '', uom_category_id: '', uom_id: '', purchase_uom_id: '', sales_uom_id: '', image_url: '', is_tax_exempt: false });
+    setForm({ name: '', price: '', category_id: '', stock: '', barcode: '', cost_price: '', unit: '', reorder_level: '', default_supplier_id: '', uom_category_id: '', uom_id: '', purchase_uom_id: '', sales_uom_id: '', image_url: '', is_tax_exempt: false, is_kit: false, components: [] });
     setEditingProduct(null);
     setShowForm(false);
   };
@@ -208,36 +246,32 @@ export default function Products() {
     : [];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">إدارة المنتجات</h1>
+          {!embedded && <h1 className="text-2xl font-bold text-gray-800">إدارة المنتجات</h1>}
           <p className="text-gray-500 mt-1">{products.length} منتج</p>
         </div>
         {user.role === 'admin' && (
           <div className="flex gap-3">
-            <button
-              onClick={() => { setShowCategoryForm(true); setEditingCategory(null); setCategoryName(''); }}
-              className="flex items-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg transition-all"
-            >
-              <HiOutlineTag />
-              التصنيفات
-            </button>
-            <button
-              onClick={() => { resetForm(); setShowForm(true); }}
-              className="flex items-center gap-2 bg-bayan-green hover:bg-bayan-dark text-white px-6 py-2 rounded-lg transition-all"
-            >
-              <HiOutlinePlus />
-              إضافة منتج
-            </button>
+            <Button variant="secondary" icon={<HiOutlinePrinter />} onClick={() => printLabels(products.map((p) => p.id))}>طباعة ملصقات</Button>
+            <Button variant="secondary" icon={<HiOutlineTag />} onClick={() => { setShowCategoryForm(true); setEditingCategory(null); setCategoryName(''); }}>التصنيفات</Button>
+            <Button variant="primary" icon={<HiOutlinePlus />} onClick={() => { resetForm(); setShowForm(true); }}>إضافة منتج</Button>
           </div>
         )}
       </div>
 
       {/* Products Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-        {products.map((product) => (
+      {groupedProducts.map(([cat, items]) => (
+        <div key={cat} className="space-y-3">
+          <div className="flex items-center gap-3">
+            <h3 className="text-xl font-extrabold text-gray-800 whitespace-nowrap">{cat}</h3>
+            <span className="text-sm font-medium text-bayan-green bg-bayan-light px-2.5 py-0.5 rounded-full">{items.length}</span>
+            <div className="flex-1 h-px bg-gray-200" />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {items.map((product) => (
           <div
             key={product.id}
             className={`bg-white rounded-xl border shadow-sm overflow-hidden ${
@@ -276,13 +310,20 @@ export default function Products() {
               </div>
               <div className="flex items-center justify-between mt-3">
                 <span className={`text-sm ${product.is_low_stock ? 'text-red-500 font-bold' : 'text-gray-500'}`}>
-                  المخزون: {product.stock}
+                  المخزون: {product.is_kit ? (product.available_stock ?? 0) : product.stock}
                   {product.is_low_stock && (
                     <span className="mr-2 text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full">منخفض</span>
                   )}
                 </span>
                 {user.role === 'admin' && (
                   <div className="flex gap-2">
+                    <button
+                      onClick={() => printLabels([product.id])}
+                      className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-all"
+                      title="طباعة ملصق باركود"
+                    >
+                      <HiOutlinePrinter />
+                    </button>
                     <button
                       onClick={() => handleEdit(product)}
                       className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
@@ -300,18 +341,21 @@ export default function Products() {
               </div>
             </div>
           </div>
-        ))}
-      </div>
+            ))}
+          </div>
+        </div>
+      ))}
 
       {products.length === 0 && (
-        <div className="text-center py-16 text-gray-400">
-          <HiOutlinePhotograph className="text-6xl mx-auto mb-4" />
-          <p className="text-lg">لا توجد منتجات بعد</p>
-          <p className="text-sm mt-1">اضغط على "إضافة منتج" للبدء</p>
-        </div>
+        <EmptyState icon={<HiOutlinePhotograph />} title="لا توجد منتجات بعد"
+          subtitle="اضغط على «إضافة منتج» للبدء"
+          action={user.role === 'admin' ? <Button icon={<HiOutlinePlus />} onClick={() => { resetForm(); setShowForm(true); }}>إضافة منتج</Button> : null} />
       )}
 
       {/* Product Form Modal */}
+      {printItems && (
+        <PrintLabelsModal items={printItems} onClose={() => setPrintItems(null)} />
+      )}
       {showForm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-lg p-6 max-h-[90vh] overflow-auto">
@@ -344,13 +388,16 @@ export default function Products() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">الكمية</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    الكمية{form.is_kit && <span className="text-xs text-gray-400"> (تُحسب من المكوّنات)</span>}
+                  </label>
                   <input
                     type="number"
-                    value={form.stock}
+                    value={form.is_kit ? '' : form.stock}
+                    disabled={form.is_kit}
                     onChange={(e) => setForm({ ...form, stock: e.target.value })}
-                    className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none"
-                    placeholder="0"
+                    className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none disabled:bg-gray-100"
+                    placeholder={form.is_kit ? 'تلقائي' : '0'}
                   />
                 </div>
               </div>
@@ -451,6 +498,47 @@ export default function Products() {
                       {catUnits.map((u) => (<option key={u.id} value={u.id}>{u.name}</option>))}
                     </select>
                   </div>
+                </div>
+              )}
+
+              {/* Kit toggle */}
+              <div className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 bg-gray-50">
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input type="checkbox" checked={form.is_kit}
+                    onChange={(e) => setForm({ ...form, is_kit: e.target.checked })}
+                    className="sr-only peer" />
+                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-emerald-300 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-bayan-green"></div>
+                </label>
+                <div>
+                  <p className="text-sm font-medium text-gray-700">منتج مُجمّع (سلة / حقيبة)</p>
+                  <p className="text-xs text-gray-400">يتكوّن من منتجات أخرى ويُخصم مخزونها عند البيع. سعر السلة ثابت والكمية تُحسب من المكوّنات.</p>
+                </div>
+              </div>
+
+              {form.is_kit && (
+                <div className="rounded-lg border border-gray-200 p-3 space-y-2">
+                  <p className="text-sm font-medium text-gray-700">المكوّنات</p>
+                  {form.components.map((c, i) => (
+                    <div key={i} className="flex gap-2 items-center">
+                      <select value={c.product_id}
+                        onChange={(e) => setForm({ ...form, components: form.components.map((x, idx) => idx === i ? { ...x, product_id: e.target.value } : x) })}
+                        className="flex-1 px-3 py-2 rounded-lg border border-gray-300 outline-none text-sm">
+                        <option value="">اختر منتجاً…</option>
+                        {products.filter((pr) => !editingProduct || pr.id !== editingProduct.id).map((pr) => (
+                          <option key={pr.id} value={pr.id}>{pr.name}</option>
+                        ))}
+                      </select>
+                      <input type="number" step="any" value={c.quantity}
+                        onChange={(e) => setForm({ ...form, components: form.components.map((x, idx) => idx === i ? { ...x, quantity: e.target.value } : x) })}
+                        placeholder="الكمية" className="w-24 px-2 py-2 rounded-lg border border-gray-300 outline-none text-sm text-center" />
+                      <button type="button"
+                        onClick={() => setForm({ ...form, components: form.components.filter((_, idx) => idx !== i) })}
+                        className="text-red-400 hover:text-red-600 px-2 text-xl leading-none">×</button>
+                    </div>
+                  ))}
+                  <button type="button"
+                    onClick={() => setForm({ ...form, components: [...form.components, { product_id: '', quantity: '' }] })}
+                    className="text-sm text-bayan-green hover:underline">+ إضافة مكوّن</button>
                 </div>
               )}
 

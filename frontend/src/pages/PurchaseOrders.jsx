@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
 import { purchaseOrdersAPI, goodsReceiptsAPI, suppliersAPI, productsAPI, uomAPI, apiError } from '../services/api';
 import toast from 'react-hot-toast';
+import PrintLabelsModal from '../components/PrintLabelsModal';
 import {
   HiOutlineClipboardList, HiOutlinePlus, HiOutlineTrash, HiOutlineX,
   HiOutlineCheckCircle, HiOutlineExclamationCircle,
+  HiOutlinePrinter,
 } from 'react-icons/hi';
 
 const STATUS = {
@@ -26,6 +28,7 @@ export default function PurchaseOrders() {
   const [form, setForm] = useState({ supplier_id: '', notes: '', lines: [{ ...emptyLine }] });
   const [expanded, setExpanded] = useState(null);
   const [receiveFor, setReceiveFor] = useState(null);
+  const [printItems, setPrintItems] = useState(null);
   const [rcvLines, setRcvLines] = useState({});
 
   useEffect(() => { loadAll(); }, []);
@@ -110,8 +113,17 @@ export default function PurchaseOrders() {
     try {
       await goodsReceiptsAPI.create({ po_id: po.id, lines });
       toast.success('تم استلام البضاعة وتحديث المخزون');
+      // offer to print barcode labels for the received items
+      const received = po.lines
+        .filter((ln) => parseFloat(rcvLines[ln.id]?.qty) > 0)
+        .map((ln) => ({ product_id: ln.product_id, name: ln.product_name, qty: Math.max(1, Math.round(parseFloat(rcvLines[ln.id].qty))) }));
       setReceiveFor(null);
       loadAll();
+      try {
+        const { data } = await productsAPI.ensureBarcodes(received.map((r) => r.product_id));
+        const qById = {}; received.forEach((r) => { qById[r.product_id] = (qById[r.product_id] || 0) + r.qty; });
+        setPrintItems(data.map((d) => ({ name: d.name, barcode: d.barcode, price: d.price, qty: qById[d.id] || 1 })));
+      } catch (e) { /* printing is optional */ }
     } catch (err) { toast.error(apiError(err, 'خطأ في الاستلام')); }
   };
 
@@ -222,7 +234,7 @@ export default function PurchaseOrders() {
                       <span className="text-gray-600 text-sm">{po.total.toFixed(2)} ر.س</span>
                       {(po.status === 'approved' || po.status === 'receiving') && (
                         <button onClick={(e) => { e.stopPropagation(); setExpanded(po.id); openReceive(po); }}
-                          className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1 rounded text-xs whitespace-nowrap">استلام</button>
+                          className="bg-bayan-green hover:bg-bayan-dark text-white px-3 py-1 rounded text-xs whitespace-nowrap">استلام</button>
                       )}
                       <span className={`text-xs px-2 py-0.5 rounded-full ${st.cls}`}>{st.label}</span>
                     </div>
@@ -267,7 +279,7 @@ export default function PurchaseOrders() {
                         )}
                         {(po.status === 'approved' || po.status === 'receiving') && (
                           <button onClick={() => openReceive(po)}
-                            className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-1.5 rounded text-sm">استلام بضاعة</button>
+                            className="bg-bayan-green hover:bg-bayan-dark text-white px-4 py-1.5 rounded text-sm">استلام بضاعة</button>
                         )}
                       </div>
 
@@ -313,7 +325,7 @@ export default function PurchaseOrders() {
                           </div>
                           <div className="flex gap-2">
                             <button onClick={() => submitReceive(po)}
-                              className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-2 rounded-lg text-sm">تأكيد الاستلام</button>
+                              className="bg-bayan-green hover:bg-bayan-dark text-white px-6 py-2 rounded-lg text-sm">تأكيد الاستلام</button>
                             <button onClick={() => setReceiveFor(null)}
                               className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-6 py-2 rounded-lg text-sm">إغلاق</button>
                           </div>
@@ -327,6 +339,9 @@ export default function PurchaseOrders() {
           </div>
         )}
       </div>
+      {printItems && (
+        <PrintLabelsModal items={printItems} onClose={() => setPrintItems(null)} />
+      )}
     </div>
   );
 }

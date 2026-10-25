@@ -124,6 +124,29 @@ def _set_auth_cookie(response: Response, token: str) -> None:
 
 # ===================== Routes =====================
 
+
+def _register_failed_login(db, tenant_slug, username, att, cfg):
+    from sqlalchemy import text as _t
+    if att:
+        newc = (att.failed_count or 0) + 1
+        locked = None
+        if newc >= cfg.max_login_attempts:
+            locked = datetime.utcnow() + timedelta(minutes=cfg.lockout_minutes)
+        db.execute(_t("UPDATE login_attempts SET failed_count=:c, locked_until=:l, updated_at=now() WHERE id=:i"),
+                   {"c": newc, "l": locked, "i": att.id})
+    else:
+        db.execute(_t("INSERT INTO login_attempts (tenant_slug, username, failed_count) VALUES (:s,:u,1)"),
+                   {"s": tenant_slug, "u": username})
+    db.commit()
+
+
+def _clear_failed_login(db, tenant_slug, username):
+    from sqlalchemy import text as _t
+    db.execute(_t("UPDATE login_attempts SET failed_count=0, locked_until=NULL, updated_at=now() "
+                  "WHERE tenant_slug=:s AND username=:u"), {"s": tenant_slug, "u": username})
+    db.commit()
+
+
 @router.post("/login", response_model=TokenResponse)
 def login(request: LoginRequest, response: Response, db: Session = Depends(get_db)):
     # A tenant must always be specified (multi-organization; no auto-pick).
@@ -139,12 +162,24 @@ def login(request: LoginRequest, response: Response, db: Session = Depends(get_d
     # Pin this connection to the tenant so the user lookup is RLS-scoped.
     _pin_session_tenant(db, tenant.id)
 
+    # --- brute-force protection: check lock, then verify ---
+    from config import settings as _cfg
+    att = db.execute(text(
+        "SELECT id, failed_count, locked_until FROM login_attempts "
+        "WHERE tenant_slug=:s AND username=:u"),
+        {"s": request.tenant, "u": request.username}).first()
+    if att and att.locked_until and att.locked_until > datetime.utcnow():
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                            detail="تم قفل الحساب مؤقتاً بسبب محاولات دخول متكررة. حاول لاحقاً.")
+
     user = db.query(User).filter(User.username == request.username).first()
     if not user or not pwd_context.verify(request.password, user.password_hash):
+        _register_failed_login(db, request.tenant, request.username, att, _cfg)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
                             detail="اسم المستخدم أو كلمة المرور غير صحيحة")
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="الحساب معطل")
+    _clear_failed_login(db, request.tenant, request.username)
 
     token = create_access_token(username=user.username, tenant_id=tenant.id)
     _set_auth_cookie(response, token)
@@ -157,6 +192,14 @@ def login(request: LoginRequest, response: Response, db: Session = Depends(get_d
 def logout(response: Response):
     response.delete_cookie(settings.cookie_name, path="/", domain=settings.cookie_domain)
     return {"message": "تم تسجيل الخروج"}
+
+@router.get("/capabilities")
+def capabilities(request: Request, db: Session = Depends(get_db),
+                 current_user: "User" = Depends(get_current_user)):
+    """Tenant business_type + capability flags, for the frontend to adapt the UI."""
+    from capabilities import get_tenant_caps
+    return get_tenant_caps(request, db)
+
 
 
 @router.get("/me", response_model=UserResponse)

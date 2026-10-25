@@ -1,8 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi.responses import JSONResponse
+import idempotency
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from database import get_db, Donation
 from routers.auth import get_current_user, User
+from capabilities import require_donations
 from datetime import datetime
 
 router = APIRouter()
@@ -36,7 +39,11 @@ class DonationResponse(BaseModel):
 # ===================== Routes =====================
 
 @router.post("/", response_model=DonationResponse)
-def create_donation(request: DonationCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def create_donation(request: DonationCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), _caps: dict = Depends(require_donations),
+                    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")):
+    prior = idempotency.replay(db, idempotency_key, "donations")
+    if prior is not None:
+        return JSONResponse(content=prior)
     if request.amount <= 0:
         raise HTTPException(status_code=400, detail="مبلغ التبرع يجب أن يكون أكبر من صفر")
 
@@ -52,7 +59,9 @@ def create_donation(request: DonationCreate, db: Session = Depends(get_db), curr
     db.commit()
     db.refresh(donation)
 
-    return _format_donation(donation)
+    _resp = _format_donation(donation)
+    idempotency.store(db, idempotency_key, "donations", _resp)
+    return _resp
 
 
 @router.get("/", response_model=list[DonationResponse])

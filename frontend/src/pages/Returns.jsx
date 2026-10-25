@@ -4,6 +4,8 @@ import toast from 'react-hot-toast';
 import { HiOutlineReceiptRefund, HiOutlineSearch } from 'react-icons/hi';
 
 export default function Returns() {
+  const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+  const isAdmin = currentUser.role === 'admin';
   const [saleId, setSaleId] = useState('');
   const [saleData, setSaleData] = useState(null); // { sale_id, total, items:[...] }
   const [qty, setQty] = useState({}); // product_id -> quantity
@@ -54,6 +56,7 @@ export default function Returns() {
     if (submittingRef.current) return;
     submittingRef.current = true;
     try {
+      if (!isAdmin) { toast.error('تنفيذ المرتجعات يتطلب صلاحية مدير'); return; }
       const res = await returnsAPI.create({
         sale_id: saleData.sale_id, items, reason: reason.trim() || null,
       });
@@ -152,12 +155,16 @@ export default function Returns() {
               <span className="text-lg font-bold text-gray-800">قيمة الاسترداد: {refundTotal.toFixed(2)} ر.س</span>
               <button
                 onClick={submit}
-                disabled={refundTotal <= 0}
-                className="flex items-center gap-2 bg-bayan-green hover:bg-bayan-dark disabled:opacity-40 text-white px-6 py-2 rounded-lg transition-all"
+                disabled={refundTotal <= 0 || !isAdmin}
+                title={!isAdmin ? 'المرتجعات تتطلب صلاحية مدير' : ''}
+                className="flex items-center gap-2 bg-bayan-green hover:bg-bayan-dark disabled:opacity-40 disabled:cursor-not-allowed text-white px-6 py-2 rounded-lg transition-all"
               >
                 <HiOutlineReceiptRefund /> تنفيذ المرتجع
               </button>
             </div>
+            {!isAdmin && (
+              <p className="text-xs text-amber-600 text-left">تنفيذ المرتجعات يتطلب صلاحية مدير.</p>
+            )}
           </div>
         </div>
       )}

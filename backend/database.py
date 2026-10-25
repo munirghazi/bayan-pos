@@ -57,6 +57,18 @@ class Tenant(Base):
     name = Column(String(200), nullable=False)
     cr_number = Column(String(30), nullable=True)
     vat_number = Column(String(20), nullable=True)
+    national_address = Column(String(50), nullable=True)
+    license_number = Column(String(50), nullable=True)   # non-profit / donation license
+    business_type = Column(String(20), nullable=False, default="mixed",
+                           server_default="mixed")  # donation|trade|mixed
+    sales_enabled = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    donations_enabled = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    purchasing_enabled = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    vat_enabled = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    inventory_enabled = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    show_powered_by = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    verification_status = Column(String(20), nullable=False, default="verified",
+                                 server_default="verified")  # verified|pending|limited|rejected
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -74,11 +86,25 @@ class TenantSettings(Base):
     vat_rate = Column(Float, default=15.0, nullable=False)
     city = Column(String(100), nullable=True)
     country = Column(String(100), nullable=True)
+    building_number = Column(String(10), nullable=True)   # رقم المبنى (4 digits)
+    street_name = Column(String(150), nullable=True)      # اسم الشارع
+    district = Column(String(100), nullable=True)         # الحي
+    postal_code = Column(String(10), nullable=True)       # الرمز البريدي (5 digits)
+    additional_number = Column(String(10), nullable=True) # الرقم الإضافي (4 digits)
+    region = Column(String(100), nullable=True)           # المنطقة
     website = Column(String(200), nullable=True)
     logo_url = Column(String(500), nullable=True)
+    favicon_url = Column(String(500), nullable=True)      # white-label
+    primary_color = Column(String(9), nullable=True)      # brand primary (hex)
+    accent_color = Column(String(9), nullable=True)       # brand accent (hex)
+    brand_name = Column(String(120), nullable=True)       # display name override
+    font_family = Column(String(80), nullable=True)       # curated web font
+    ui_radius = Column(String(20), nullable=True)         # sharp | default | rounded
+    receipt_footer = Column(Text, nullable=True)          # custom receipt footer line
     inventory_mode = Column(String(20), default="per_branch", nullable=False)  # shared_pool | per_branch
     fatoora_enabled_default = Column(Boolean, default=False, nullable=False)
     payment_methods = Column(String(200), default="cash,card,transfer", nullable=False)
+    data_retention_months = Column(Integer, nullable=True)   # PDPL retention policy (null = keep)
 
     tenant = relationship("Tenant", back_populates="settings")
 
@@ -134,6 +160,7 @@ class Product(Base):
     is_active = Column(Boolean, default=True)
     is_tax_exempt = Column(Boolean, default=False)
     is_kit = Column(Boolean, default=False, nullable=False)  # composed of other products
+    is_consignment = Column(Boolean, default=False, nullable=False, server_default=text("false"))  # consigned item, hidden from owned catalog
     created_at = Column(DateTime, default=datetime.utcnow)
 
     category = relationship("Category", back_populates="products")
@@ -167,6 +194,7 @@ class SaleItem(Base):
     uom_id = Column(Integer, ForeignKey("uoms.id"), nullable=True)
     price = Column(Float, nullable=False)                 # per selling unit
     is_tax_exempt = Column(Boolean, default=False)
+    consignment_item_id = Column(Integer, ForeignKey("consignment_items.id"), nullable=True)
 
     sale = relationship("Sale", back_populates="items")
     product = relationship("Product", back_populates="sale_items")
@@ -447,6 +475,7 @@ class Customer(Base):
     vat_number = Column(String(20), nullable=True)
     address = Column(String(300), nullable=True)
     city = Column(String(100), nullable=True)
+    erased_at = Column(DateTime, nullable=True)   # PDPL erasure marker
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -494,6 +523,123 @@ def ensure_default_branch(db, tenant_id: int):
     if db.query(Register).filter(Register.location_id == loc.id).first() is None:
         db.add(Register(tenant_id=tenant_id, location_id=loc.id, name="الصندوق 1"))
     db.commit()
+
+
+class RegisterClosing(Base):
+    """Wave 2: end-of-day / register (Z) closing — a cash-up snapshot per register."""
+    __tablename__ = "register_closings"
+    id = Column(Integer, primary_key=True)
+    tenant_id = _tenant_col()
+    register_id = Column(Integer, ForeignKey("registers.id", ondelete="CASCADE"), nullable=False, index=True)
+    opened_at = Column(DateTime, nullable=True)     # since previous close (null = first)
+    closed_at = Column(DateTime, nullable=False, server_default=text("now()"))
+    closed_by = Column(String(100), nullable=True)
+    opening_float = Column(Float, nullable=False, default=0, server_default=text("0"))
+    sales_count = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    total_sales = Column(Float, nullable=False, default=0, server_default=text("0"))
+    cash_sales = Column(Float, nullable=False, default=0, server_default=text("0"))
+    card_sales = Column(Float, nullable=False, default=0, server_default=text("0"))
+    transfer_sales = Column(Float, nullable=False, default=0, server_default=text("0"))
+    other_sales = Column(Float, nullable=False, default=0, server_default=text("0"))
+    expected_cash = Column(Float, nullable=False, default=0, server_default=text("0"))
+    counted_cash = Column(Float, nullable=False, default=0, server_default=text("0"))
+    variance = Column(Float, nullable=False, default=0, server_default=text("0"))
+    note = Column(Text, nullable=True)
+
+
+# ===================== Wave 1: security & integrity =====================
+
+class LoginAttempt(Base):
+    """Brute-force protection (pre-auth; not tenant-scoped)."""
+    __tablename__ = "login_attempts"
+    id = Column(Integer, primary_key=True)
+    tenant_slug = Column(String(63), nullable=False)
+    username = Column(String(100), nullable=False)
+    failed_count = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    locked_until = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, server_default=text("now()"))
+    __table_args__ = (UniqueConstraint("tenant_slug", "username", name="uq_login_attempt"),)
+
+
+class IdempotencyKey(Base):
+    """De-duplicate POSTs (sales/donations) so retries never double-post."""
+    __tablename__ = "idempotency_keys"
+    id = Column(Integer, primary_key=True)
+    tenant_id = _tenant_col()
+    idem_key = Column(String(120), nullable=False)
+    endpoint = Column(String(60), nullable=False)
+    response_json = Column(Text, nullable=False)
+    created_at = Column(DateTime, server_default=text("now()"))
+    __table_args__ = (UniqueConstraint("tenant_id", "idem_key", "endpoint", name="uq_idem"),)
+
+
+class TenantAuditLog(Base):
+    """Tenant-side audit trail for sensitive actions (e.g. refunds)."""
+    __tablename__ = "tenant_audit_log"
+    id = Column(Integer, primary_key=True)
+    tenant_id = _tenant_col()
+    user_id = Column(Integer, nullable=True)
+    username = Column(String(100), nullable=True)
+    action = Column(String(60), nullable=False)
+    target = Column(String(120), nullable=True)
+    detail = Column(Text, nullable=True)
+    created_at = Column(DateTime, server_default=text("now()"))
+
+
+# ===================== Consignment (v1) =====================
+
+class Consignor(Base):
+    __tablename__ = "consignors"
+    id = Column(Integer, primary_key=True)
+    tenant_id = _tenant_col()
+    name = Column(String(200), nullable=False)
+    phone = Column(String(30), nullable=True)
+    email = Column(String(200), nullable=True)
+    supplier_id = Column(Integer, ForeignKey("suppliers.id", ondelete="SET NULL"), nullable=True)  # optional link
+    default_commission_percent = Column(Float, nullable=False, default=0, server_default=text("0"))
+    return_period_days = Column(Integer, nullable=True)   # expiry/return window
+    payout_terms = Column(Text, nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    created_at = Column(DateTime, server_default=text("now()"))
+
+
+class ConsignmentIntake(Base):
+    __tablename__ = "consignment_intakes"
+    id = Column(Integer, primary_key=True)
+    tenant_id = _tenant_col()
+    consignor_id = Column(Integer, ForeignKey("consignors.id", ondelete="CASCADE"), nullable=False, index=True)
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime, server_default=text("now()"))
+
+
+class ConsignmentItem(Base):
+    __tablename__ = "consignment_items"
+    id = Column(Integer, primary_key=True)
+    tenant_id = _tenant_col()
+    intake_id = Column(Integer, ForeignKey("consignment_intakes.id", ondelete="CASCADE"), nullable=False, index=True)
+    consignor_id = Column(Integer, ForeignKey("consignors.id", ondelete="CASCADE"), nullable=False, index=True)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False, index=True)
+    qty_received = Column(_QTY, nullable=False)
+    qty_remaining = Column(_QTY, nullable=False)
+    unit_price = Column(Float, nullable=False)          # agreed sale price
+    commission_percent = Column(Float, nullable=False, default=0, server_default=text("0"))  # shop's %
+    barcode = Column(String(40), nullable=True, index=True)
+    status = Column(String(12), nullable=False, default="active", server_default=text("'active'"))
+    returned_qty = Column(_QTY, nullable=False, default=0, server_default=text("0"))
+    created_at = Column(DateTime, server_default=text("now()"))
+
+
+class ConsignmentLedger(Base):
+    __tablename__ = "consignment_ledger"
+    id = Column(Integer, primary_key=True)
+    tenant_id = _tenant_col()
+    consignor_id = Column(Integer, ForeignKey("consignors.id", ondelete="CASCADE"), nullable=False, index=True)
+    entry_type = Column(String(12), nullable=False)     # accrual | payout
+    sale_id = Column(Integer, ForeignKey("sales.id"), nullable=True)
+    consignment_item_id = Column(Integer, ForeignKey("consignment_items.id"), nullable=True)
+    amount = Column(Float, nullable=False)              # +accrual (owed to consignor), -payout
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime, server_default=text("now()"))
 
 
 def get_db(request: Request):

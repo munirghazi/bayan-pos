@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     secret_key: str = ""          # REQUIRED in production; auto-generated in dev
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 480
+    max_login_attempts: int = 5
+    lockout_minutes: int = 15
 
     # --- Cookies (httpOnly session token) ---
     cookie_name: str = "access_token"
