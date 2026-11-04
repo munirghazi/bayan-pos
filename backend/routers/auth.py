@@ -64,6 +64,11 @@ class UserUpdate(BaseModel):
     location_id: int | None = None
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
 def _validate_location(db, location_id):
     if location_id is None:
         return
@@ -205,6 +210,26 @@ def capabilities(request: Request, db: Session = Depends(get_db),
 @router.get("/me", response_model=UserResponse)
 def get_me(current_user: User = Depends(get_current_user)):
     return current_user
+
+
+@router.post("/change-password")
+def change_password(request: ChangePasswordRequest, db: Session = Depends(get_db),
+                    current_user: User = Depends(get_current_user)):
+    """Self-service password change for the logged-in user. Also clears the
+    must_change_password flag (used by the forced first-login change)."""
+    if not pwd_context.verify(request.current_password, current_user.password_hash):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="كلمة المرور الحالية غير صحيحة")
+    if len(request.new_password) < 8:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="كلمة المرور الجديدة يجب أن تكون 8 أحرف على الأقل")
+    if request.new_password == request.current_password:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="كلمة المرور الجديدة يجب أن تختلف عن الحالية")
+    current_user.password_hash = pwd_context.hash(request.new_password)
+    current_user.must_change_password = False
+    db.commit()
+    return {"message": "تم تغيير كلمة المرور بنجاح"}
 
 
 @router.get("/users", response_model=list[UserResponse])

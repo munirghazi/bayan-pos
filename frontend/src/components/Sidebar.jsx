@@ -18,6 +18,7 @@ import {
   HiOutlineArchive,
   HiOutlineClipboardList,
   HiOutlineCalculator,
+  HiOutlineKey,
   HiOutlineLogout,
   HiOutlineMenu,
 } from 'react-icons/hi';
@@ -162,6 +163,14 @@ export default function Sidebar() {
             </div>
           </div>
         )}
+        <NavLink
+          to="/change-password"
+          title="تغيير كلمة المرور"
+          className={`flex items-center ${collapsed ? 'justify-center px-0' : 'gap-3 px-4'} py-3 rounded-lg text-indigo-200 hover:bg-bayan-green/50 hover:text-white transition-all w-full`}
+        >
+          <HiOutlineKey className="text-xl flex-shrink-0" />
+          {!collapsed && <span className="font-medium">تغيير كلمة المرور</span>}
+        </NavLink>
         <button
           onClick={handleLogout}
           title="تسجيل الخروج"

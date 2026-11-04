@@ -30,6 +30,7 @@ export const authAPI = {
   login: (username, password, tenant) => api.post('/auth/login', { username, password, tenant }),
   logout: () => api.post('/auth/logout'),
   getMe: () => api.get('/auth/me'),
+  changePassword: (data) => api.post('/auth/change-password', data),
   getCapabilities: () => api.get('/auth/capabilities'),
   getUsers: () => api.get('/auth/users'),
   createUser: (data) => api.post('/auth/users', data),

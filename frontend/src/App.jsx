@@ -7,6 +7,7 @@ import { applyTheme, storeTheme } from './utils/theme';
 import { saveCapabilities } from './utils/posSettings';
 import { syncZATCAFromTenant } from './utils/zatca';
 import Login from './pages/Login';
+import ChangePassword from './pages/ChangePassword';
 import Dashboard from './pages/Dashboard';
 import POS from './pages/POS';
 import Products from './pages/Products';
@@ -37,6 +38,10 @@ function ProtectedLayout() {
       .catch(() => {});
   }, [token]);
   if (!token) return <Navigate to="/login" replace />;
+
+  // Force a password change before the app is usable when the account is flagged.
+  const user = JSON.parse(localStorage.getItem('user') || '{}');
+  if (user.must_change_password) return <Navigate to="/change-password" replace />;
 
   return (
     <div className="flex h-[100dvh] overflow-hidden bg-gray-50">
@@ -74,6 +79,14 @@ export default function App() {
             <PublicRoute>
               <Login />
             </PublicRoute>
+          }
+        />
+        <Route
+          path="/change-password"
+          element={
+            localStorage.getItem('token')
+              ? <ChangePassword />
+              : <Navigate to="/login" replace />
           }
         />
         <Route element={<ProtectedLayout />}>
