@@ -58,6 +58,12 @@ function RequireCap({ flag, children }) {
   return getCapabilities()[flag] ? children : <Navigate to="/" replace />;
 }
 
+// Reads the token when the route renders (not when the app first loads), so the
+// redirect right after login sees the fresh token instead of looping to a blank page.
+function ChangePasswordRoute() {
+  return localStorage.getItem('token') ? <ChangePassword /> : <Navigate to="/login" replace />;
+}
+
 function PublicRoute({ children }) {
   const token = localStorage.getItem('token');
   if (token) return <Navigate to="/" replace />;
@@ -88,11 +94,7 @@ export default function App() {
         />
         <Route
           path="/change-password"
-          element={
-            localStorage.getItem('token')
-              ? <ChangePassword />
-              : <Navigate to="/login" replace />
-          }
+          element={<ChangePasswordRoute />}
         />
         <Route element={<ProtectedLayout />}>
           <Route path="/" element={<Dashboard />} />
