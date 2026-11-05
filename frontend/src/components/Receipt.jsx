@@ -58,9 +58,11 @@ const Receipt = forwardRef(({ sale, type = 'sale', donation = null, creditNote =
     join([seller.district, join([seller.city, seller.postal_code], ' ')], '، '),
     seller.country,
   ].filter(Boolean);
-  const addrEn = [
-    join([join([seller.building_number, seller.street_name_en], ' '), seller.secondary_number || seller.additional_number], ' - '),
-    join([seller.district_en, join([seller.city_en, seller.postal_code], ' ')], ', '),
+  // English block only when the English address was actually entered (no half lines).
+  const hasEn = !!(seller.street_name_en || seller.district_en || seller.city_en);
+  const addrEn = !hasEn ? [] : [
+    seller.street_name_en && join([join([seller.building_number, seller.street_name_en], ' '), seller.secondary_number || seller.additional_number], ' - '),
+    (seller.district_en || seller.city_en) && join([seller.district_en, join([seller.city_en, seller.postal_code], ' ')], ', '),
     seller.country_en,
   ].filter(Boolean);
   // Registration numbers: unified number + the one that fits the organization type.

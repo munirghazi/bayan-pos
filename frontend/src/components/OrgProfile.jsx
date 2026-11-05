@@ -89,6 +89,9 @@ export default function OrgProfile() {
       if (!t(f.city)) { toast.error('المدينة مطلوبة'); return; }
     }
     if (t(f.additional_number) && !/^\d{4}$/.test(t(f.additional_number))) { toast.error('الرقم الفرعي: 4 أرقام'); return; }
+    if (f.show_en_address && !(t(f.street_name_en) && t(f.district_en) && t(f.city_en))) {
+      toast.error('لإظهار العنوان بالإنجليزية أكمل: الشارع والحي والمدينة بالإنجليزية'); return;
+    }
     if (saving.current) return;
     saving.current = true;
     try {
@@ -229,6 +232,9 @@ export default function OrgProfile() {
           <input type="checkbox" className="w-5 h-5" checked={!!f.show_en_address} onChange={(e) => set('show_en_address', e.target.checked)} />
           إظهار العنوان بالإنجليزية في الفاتورة (إضافةً إلى العربي)
         </label>
+        {f.show_en_address && !(f.street_name_en && f.district_en && f.city_en) && (
+          <p className="text-xs text-amber-700">أكمل الحقول الإنجليزية (الشارع، الحي، المدينة) — وإلا لن يُطبع العنوان الإنجليزي.</p>
+        )}
       </div>
 
       {/* ===== Receipt details ===== */}
