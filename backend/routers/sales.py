@@ -3,12 +3,13 @@ from fastapi.responses import JSONResponse
 import idempotency
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from database import get_db, Sale, SaleItem, Product, Register, Customer, ConsignmentItem, ConsignmentLedger
+from database import get_db, Sale, SaleItem, Product, Customer, ConsignmentItem, ConsignmentLedger
 from routers.auth import get_current_user, User
 from capabilities import require_sales, require_invoice_identity
 from kits import explode_to_leaves
 from stock import record_movement, to_base_qty
 from datetime import datetime
+import invoicing as inv
 
 router = APIRouter()
 
@@ -39,26 +40,35 @@ class SaleItemResponse(BaseModel):
     uom_name: str | None = None
     price: float
     is_tax_exempt: bool = False
-
-    class Config:
-        from_attributes = True
+    vat_rate: float = 0
+    line_total: float = 0
+    line_vat: float = 0
 
 
 class SaleResponse(BaseModel):
     id: int
+    invoice_number: str
+    invoice_type: str
+    is_tax_invoice: bool
+    uuid: str
+    location_id: int
+    location_code: str | None = None
     user_id: int
     user_name: str | None = None
+    subtotal: float
+    vat_amount: float
+    exempt_amount: float = 0
     total: float
     payment_method: str
     card_ref: str | None = None
     register_id: int | None = None
     customer_id: int | None = None
     customer_name: str | None = None
+    seller: dict
+    qr_data: str | None = None
     items: list[SaleItemResponse]
+    issued_at: datetime
     created_at: datetime
-
-    class Config:
-        from_attributes = True
 
 
 # ===================== Routes =====================
@@ -73,19 +83,14 @@ def create_sale(request: SaleCreate, db: Session = Depends(get_db), current_user
     if not request.items:
         raise HTTPException(status_code=400, detail="يجب إضافة منتج واحد على الأقل")
 
-    if request.register_id is not None:
-        reg = db.query(Register).filter(Register.id == request.register_id).first()
-        if not reg:
-            raise HTTPException(status_code=400, detail="الصندوق غير موجود")
-        # A branch-assigned user may only sell on a register in their own branch.
-        if current_user.location_id is not None and reg.location_id != current_user.location_id:
-            raise HTTPException(status_code=403, detail="لا يمكنك البيع على صندوق خارج فرعك")
+    _check_payment(db, request.payment_method, request.card_ref, inv.SALE_PAYMENT_METHODS)
+    # Every invoice belongs to a branch (its numbering series).
+    location_id, register_id = inv.resolve_location(db, request.register_id, current_user)
 
     if request.customer_id is not None:
         if not db.query(Customer).filter(Customer.id == request.customer_id).first():
             raise HTTPException(status_code=400, detail="العميل غير موجود")
 
-    total = 0.0
     sale_items = []
     leaf_demand: dict[int, float] = {}   # leaf product id -> total units this sale needs
 
@@ -113,7 +118,6 @@ def create_sale(request: SaleCreate, db: Session = Depends(get_db), current_user
                 raise HTTPException(status_code=400,
                     detail=f"الكمية المتاحة من الأمانة غير كافية. المتاح: {round(float(ci.qty_remaining or 0),3):g}")
             line_price = ci.unit_price
-            total += line_price * item.quantity
             sale_items.append({
                 "product": product, "quantity": item.quantity, "uom_id": sell_uom_id,
                 "price": line_price, "is_tax_exempt": product.is_tax_exempt,
@@ -123,8 +127,6 @@ def create_sale(request: SaleCreate, db: Session = Depends(get_db), current_user
 
         base_qty = item.quantity if product.is_kit else to_base_qty(db, product, item.quantity, sell_uom_id)
 
-        item_total = product.price * item.quantity
-        total += item_total
         sale_items.append({
             "product": product,
             "quantity": item.quantity,        # in the selling unit
@@ -145,28 +147,67 @@ def create_sale(request: SaleCreate, db: Session = Depends(get_db), current_user
             avail = round(float(leaf.stock or 0), 3)
             raise HTTPException(status_code=400, detail=f"الكمية المطلوبة من '{leaf.name}' غير متوفرة. المتاح: {avail:g}")
 
-    # Create sale
+    # ---- issue the invoice: VAT + seller snapshot, number, hash chain, QR
+    from database import Uom
+    seller = inv.seller_snapshot(db)
+    for it in sale_items:
+        uom = db.query(Uom).filter(Uom.id == it["uom_id"]).first() if it["uom_id"] else None
+        it["uom_name"] = uom.name if uom else None
+    priced, totals = inv.price_lines(sale_items, seller)
+    alloc = inv.allocate(db, location_id, inv.DOC_INVOICE)
+    issued_at = inv.utcnow()
+    uid = inv.new_uuid()
+    doc_hash = inv.document_hash({
+        "type": inv.DOC_INVOICE, "number": alloc.number, "uuid": uid, "icv": alloc.seq,
+        "pih": alloc.previous_hash, "issued_at": issued_at, "seller_vat": seller["vat_number"],
+        "total": totals["total"], "vat": totals["vat_amount"],
+        "lines": [{"name": ln["product"].name, "qty": inv.d(ln["quantity"]),
+                   "price": inv.d(ln["price"]), "vat": ln["line_vat"]} for ln in priced],
+    })
+    qr = (inv.zatca_qr(seller["name"], seller["vat_number"], issued_at,
+                       totals["total"], totals["vat_amount"])
+          if seller["vat_registered"] else None)
+
     sale = Sale(
         user_id=current_user.id,
-        register_id=request.register_id,
+        register_id=register_id,
+        location_id=location_id,
         customer_id=request.customer_id,
-        total=round(total, 2),
+        invoice_number=alloc.number,
+        invoice_seq=alloc.seq,
+        invoice_type="simplified",
+        is_tax_invoice=seller["vat_registered"],
+        uuid=uid,
+        previous_hash=alloc.previous_hash,
+        invoice_hash=doc_hash,
+        issued_at=issued_at,
+        subtotal=totals["subtotal"],
+        vat_amount=totals["vat_amount"],
+        exempt_amount=totals["exempt_amount"],
+        total=totals["total"],
+        seller=seller,
+        qr_data=qr,
         payment_method=request.payment_method,
-        card_ref=request.card_ref,
+        card_ref=(request.card_ref or "").strip() or None,
     )
     db.add(sale)
     db.flush()
 
     # Sale lines record the sold product (the kit itself, at its fixed price).
-    for item_data in sale_items:
+    for item_data in priced:
         ci = item_data.get("consignment_item")
         db.add(SaleItem(
             sale_id=sale.id,
             product_id=item_data["product"].id,
+            product_name=item_data["product"].name,
             quantity=item_data["quantity"],
             uom_id=item_data["uom_id"],
+            uom_name=item_data["uom_name"],
             price=item_data["price"],
             is_tax_exempt=item_data["is_tax_exempt"],
+            vat_rate=item_data["vat_rate"],
+            line_total=item_data["line_total"],
+            line_vat=item_data["line_vat"],
             consignment_item_id=(ci.id if ci else None),
         ))
         # consigned lot: decrement remaining + accrue consignor share
@@ -179,6 +220,7 @@ def create_sale(request: SaleCreate, db: Session = Depends(get_db), current_user
                 consignor_id=ci.consignor_id, entry_type="accrual",
                 sale_id=sale.id, consignment_item_id=ci.id, amount=consignor_share,
                 note=f"بيع {item_data['quantity']:g} × {item_data['product'].name}"))
+    inv.commit_allocation(db, alloc, doc_hash)
 
     # Deduct stock from leaf products only.
     for leaf_id, need in leaf_demand.items():
@@ -206,6 +248,15 @@ def get_sales(
     return [_format_sale(s) for s in sales]
 
 
+@router.get("/by-number/{invoice_number}", response_model=SaleResponse)
+def get_sale_by_number(invoice_number: str, db: Session = Depends(get_db),
+                       current_user: User = Depends(get_current_user)):
+    sale = db.query(Sale).filter(Sale.invoice_number == invoice_number.strip().upper()).first()
+    if not sale:
+        raise HTTPException(status_code=404, detail="الفاتورة غير موجودة")
+    return _format_sale(sale)
+
+
 @router.get("/{sale_id}", response_model=SaleResponse)
 def get_sale(sale_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     sale = db.query(Sale).filter(Sale.id == sale_id).first()
@@ -214,28 +265,56 @@ def get_sale(sale_id: int, db: Session = Depends(get_db), current_user: User = D
     return _format_sale(sale)
 
 
+def _check_payment(db, method: str, card_ref: str | None, allowed: set[str]) -> None:
+    """Method must be valid for this document type AND enabled for the tenant."""
+    from database import TenantSettings
+    st = db.query(TenantSettings).first()
+    enabled = {m.strip() for m in ((st.payment_methods if st else None) or "cash,card,transfer").split(",")}
+    if method not in allowed:
+        raise HTTPException(status_code=400, detail="طريقة الدفع غير مسموحة لهذه العملية")
+    if method not in enabled:
+        raise HTTPException(status_code=400, detail="طريقة الدفع غير مفعّلة في الإعدادات")
+    if method == "card" and not (card_ref or "").strip():
+        raise HTTPException(status_code=400, detail="الرجاء إدخال رمز العملية للدفع بالشبكة")
+
+
 def _format_sale(sale: Sale) -> dict:
     return {
         "id": sale.id,
+        "invoice_number": sale.invoice_number,
+        "invoice_type": sale.invoice_type,
+        "is_tax_invoice": sale.is_tax_invoice,
+        "uuid": str(sale.uuid),
+        "location_id": sale.location_id,
+        "location_code": sale.location.code if sale.location else None,
         "user_id": sale.user_id,
         "user_name": sale.user.full_name if sale.user else None,
-        "total": sale.total,
+        "subtotal": inv.money(sale.subtotal),
+        "vat_amount": inv.money(sale.vat_amount),
+        "exempt_amount": inv.money(sale.exempt_amount),
+        "total": inv.money(sale.total),
         "payment_method": sale.payment_method,
         "card_ref": sale.card_ref,
         "register_id": sale.register_id,
         "customer_id": sale.customer_id,
         "customer_name": sale.customer.name if getattr(sale, "customer", None) else None,
+        "seller": sale.seller or {},
+        "qr_data": sale.qr_data,
+        "issued_at": sale.issued_at,
         "created_at": sale.created_at,
         "items": [
             {
                 "id": item.id,
                 "product_id": item.product_id,
-                "product_name": item.product.name if item.product else None,
+                "product_name": item.product_name or (item.product.name if item.product else None),
                 "quantity": item.quantity,
                 "uom_id": item.uom_id,
-                "uom_name": item.uom.name if getattr(item, "uom", None) else None,
-                "price": item.price,
+                "uom_name": item.uom_name,
+                "price": float(item.price),
                 "is_tax_exempt": item.is_tax_exempt,
+                "vat_rate": float(item.vat_rate or 0),
+                "line_total": inv.money(item.line_total),
+                "line_vat": inv.money(item.line_vat),
             }
             for item in sale.items
         ]

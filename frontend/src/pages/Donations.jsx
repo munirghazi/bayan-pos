@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { donationsAPI } from '../services/api';
+import { donationsAPI, apiError } from '../services/api';
+import { getPOSSettings } from '../utils/posSettings';
+import { fmtDateTime } from '../utils/datetime';
 import Receipt from '../components/Receipt';
 import { SarIcon } from '../components/SarIcon';
 import { printReceipt } from '../utils/printReceipt';
@@ -8,9 +10,8 @@ import toast from 'react-hot-toast';
 import {
   HiOutlineHeart,
   HiOutlinePlus,
-  HiOutlineTrash,
+  HiOutlineBan,
   HiOutlinePrinter,
-  HiOutlineCash,
   HiOutlineCreditCard,
   HiOutlineDeviceMobile,
   HiOutlineDocumentDownload,
@@ -24,8 +25,17 @@ const WhatsAppIcon = () => (
 );
 
 const paymentMethodAr = { cash: 'نقدي', card: 'شبكة', transfer: 'تحويل' };
+// Donations: POS terminal (card) or bank transfer only — never cash.
+const DONATION_METHODS = [
+  { key: 'card', icon: HiOutlineCreditCard, label: 'شبكة' },
+  { key: 'transfer', icon: HiOutlineDeviceMobile, label: 'تحويل بنكي' },
+];
 
 export default function Donations() {
+  const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+  const isAdmin = currentUser.role === 'admin';
+  const enabled = getPOSSettings().paymentMethods || {};
+  const methods = DONATION_METHODS.filter((m) => enabled[m.key] !== false);
   const [donations, setDonations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -37,7 +47,8 @@ export default function Donations() {
     donor_name: '',
     amount: '',
     note: '',
-    payment_method: 'cash',
+    payment_method: methods[0]?.key || 'card',
+    card_ref: '',
   });
 
   useEffect(() => {
@@ -63,33 +74,48 @@ export default function Donations() {
       return;
     }
 
+    if (!methods.some((m) => m.key === form.payment_method)) {
+      toast.error('اختر طريقة الدفع: شبكة أو تحويل بنكي');
+      return;
+    }
+    if (form.payment_method === 'card' && !form.card_ref.trim()) {
+      toast.error('الرجاء إدخال رمز العملية');
+      return;
+    }
+    const reg = localStorage.getItem('pos_register_id');
+
     try {
       const res = await donationsAPI.create({
         donor_name: form.donor_name || null,
         amount,
         note: form.note || null,
         payment_method: form.payment_method,
+        card_ref: form.payment_method === 'card' ? form.card_ref.trim() : null,
+        register_id: reg ? parseInt(reg) : null,
       });
 
       setSelectedDonation(res.data);
       setShowForm(false);
       setShowReceipt(true);
-      setForm({ donor_name: '', amount: '', note: '', payment_method: 'cash' });
+      setForm({ donor_name: '', amount: '', note: '', payment_method: methods[0]?.key || 'card', card_ref: '' });
       loadDonations();
       toast.success('تم تسجيل التبرع - جزاكم الله خيراً');
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'خطأ في تسجيل التبرع');
+      toast.error(apiError(err, 'خطأ في تسجيل التبرع'));
     }
   };
 
-  const handleDelete = async (id) => {
-    if (!confirm('هل أنت متأكد من حذف هذا التبرع؟')) return;
+  // Issued receipts are never deleted — an admin voids them with a reason.
+  const handleVoid = async (donation) => {
+    const reason = window.prompt(`سبب إلغاء الإيصال ${donation.receipt_number}:`);
+    if (reason === null) return;
+    if (!reason.trim()) { toast.error('سبب الإلغاء مطلوب'); return; }
     try {
-      await donationsAPI.delete(id);
-      toast.success('تم حذف التبرع');
+      await donationsAPI.void(donation.id, reason.trim());
+      toast.success(`تم إلغاء الإيصال ${donation.receipt_number}`);
       loadDonations();
     } catch (err) {
-      toast.error('خطأ في حذف التبرع');
+      toast.error(apiError(err, 'خطأ في إلغاء الإيصال'));
     }
   };
 
@@ -97,7 +123,7 @@ export default function Donations() {
     printReceipt(receiptRef);
   };
 
-  const getFilename = () => selectedDonation ? `إيصال_تبرع_${selectedDonation.id}` : 'إيصال_تبرع';
+  const getFilename = () => selectedDonation ? `إيصال_تبرع_${selectedDonation.receipt_number}` : 'إيصال_تبرع';
 
   const handleDownloadPDF = async () => {
     if (!receiptRef.current) return;
@@ -136,7 +162,8 @@ export default function Donations() {
     }
   };
 
-  const totalDonations = donations.reduce((sum, d) => sum + d.amount, 0);
+  const liveDonations = donations.filter((d) => d.status !== 'void');
+  const totalDonations = liveDonations.reduce((sum, d) => sum + d.amount, 0);
 
   if (loading) {
     return (
@@ -154,7 +181,7 @@ export default function Donations() {
           <h1 className="text-2xl font-bold text-gray-800">التبرعات</h1>
           <p className="text-gray-500 mt-1">
             الإجمالي: <span className="font-bold text-purple-600">{totalDonations.toFixed(2)} <SarIcon size={14} /></span>
-            {' '} ({donations.length} تبرع)
+            {' '} ({liveDonations.length} تبرع)
           </p>
         </div>
         <button
@@ -171,7 +198,7 @@ export default function Donations() {
         <table className="w-full">
           <thead className="bg-gray-50">
             <tr>
-              <th className="text-right px-6 py-3 text-sm font-medium text-gray-500">#</th>
+              <th className="text-right px-6 py-3 text-sm font-medium text-gray-500">رقم الإيصال</th>
               <th className="text-right px-6 py-3 text-sm font-medium text-gray-500">المتبرع</th>
               <th className="text-right px-6 py-3 text-sm font-medium text-gray-500">المبلغ</th>
               <th className="text-right px-6 py-3 text-sm font-medium text-gray-500">طريقة الدفع</th>
@@ -183,8 +210,13 @@ export default function Donations() {
           </thead>
           <tbody className="divide-y divide-gray-100">
             {donations.map((donation) => (
-              <tr key={donation.id} className="hover:bg-gray-50">
-                <td className="px-6 py-4 text-sm text-gray-600">{donation.id}</td>
+              <tr key={donation.id} className={`hover:bg-gray-50 ${donation.status === 'void' ? 'opacity-60' : ''}`}>
+                <td className="px-6 py-4 text-sm text-gray-600">
+                  <span dir="ltr">{donation.receipt_number}</span>
+                  {donation.status === 'void' && (
+                    <span className="mr-2 text-xs text-red-600 font-bold" title={donation.void_reason || ''}>ملغى</span>
+                  )}
+                </td>
                 <td className="px-6 py-4">
                   <span className="font-medium text-gray-800">
                     {donation.donor_name || 'متبرع مجهول'}
@@ -198,7 +230,7 @@ export default function Donations() {
                 </td>
                 <td className="px-6 py-4 text-sm text-gray-600">{donation.note || '-'}</td>
                 <td className="px-6 py-4 text-sm text-gray-600">
-                  {new Date(donation.created_at).toLocaleDateString('ar-SA')}
+                  {fmtDateTime(donation.issued_at)}
                 </td>
                 <td className="px-6 py-4 text-sm text-gray-600">{donation.user_name}</td>
                 <td className="px-6 py-4">
@@ -210,13 +242,15 @@ export default function Donations() {
                     >
                       <HiOutlinePrinter />
                     </button>
-                    <button
-                      onClick={() => handleDelete(donation.id)}
-                      className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-all"
-                      title="حذف"
-                    >
-                      <HiOutlineTrash />
-                    </button>
+                    {isAdmin && donation.status !== 'void' && (
+                      <button
+                        onClick={() => handleVoid(donation)}
+                        className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                        title="إلغاء الإيصال (مع ذكر السبب)"
+                      >
+                        <HiOutlineBan />
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>
@@ -277,12 +311,9 @@ export default function Donations() {
                 />
               </div>
 
-              <div className="grid grid-cols-3 gap-2">
-                {[
-                  { key: 'cash', icon: HiOutlineCash, label: 'نقدي' },
-                  { key: 'card', icon: HiOutlineCreditCard, label: 'شبكة' },
-                  { key: 'transfer', icon: HiOutlineDeviceMobile, label: 'تحويل' },
-                ].map(({ key, icon: Icon, label }) => (
+              <p className="text-xs text-gray-500">لا تُقبل التبرعات نقداً — الدفع بالشبكة أو التحويل البنكي</p>
+              <div className="grid grid-cols-2 gap-2">
+                {methods.map(({ key, icon: Icon, label }) => (
                   <button
                     key={key}
                     type="button"
@@ -298,6 +329,17 @@ export default function Donations() {
                   </button>
                 ))}
               </div>
+
+              {form.payment_method === 'card' && (
+                <input
+                  type="text"
+                  dir="ltr"
+                  value={form.card_ref}
+                  onChange={(e) => setForm({ ...form, card_ref: e.target.value })}
+                  placeholder="رمز العملية *"
+                  className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-purple-500 outline-none text-center"
+                />
+              )}
 
               <div className="flex gap-3 pt-2">
                 <button

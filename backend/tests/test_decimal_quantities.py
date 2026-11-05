@@ -37,7 +37,7 @@ def test_fractional_non_kit_sale_and_return(client):
     assert sale.status_code == 200, sale.text
     assert stock_of(client, h, pid) == 8.5
     # return 0.5 kg -> 9.0
-    r = client.post("/api/returns/", headers=h, json={
+    r = client.post("/api/returns/", headers=h, json={"reason": "اختبار", 
         "sale_id": sale.json()["id"], "items": [{"product_id": pid, "quantity": 0.5}]})
     assert r.status_code == 200, r.text
     assert stock_of(client, h, pid) == 9.0

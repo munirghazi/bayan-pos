@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { fmtDate, fmtTime } from '../utils/datetime';
 import { reportsAPI } from '../services/api';
 import { SarIcon } from '../components/SarIcon';
 import {
@@ -71,6 +72,9 @@ export default function Dashboard() {
 
   const paymentMethodAr = { cash: 'نقدي', card: 'شبكة', transfer: 'تحويل' };
 
+  // Donations figures exist only when the tenant has donations enabled (server decides).
+  const donationsOn = !!data.donations_enabled && data.today.donations_total !== undefined;
+
   const sarSuffix = (amount) => (
     <>{amount.toFixed(2)} <SarIcon size={16} /></>
   );
@@ -80,11 +84,11 @@ export default function Dashboard() {
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-gray-800">لوحة التحكم</h1>
-        <p className="text-gray-500 mt-1">ملخص اليوم - {new Date().toLocaleDateString('ar-SA')}</p>
+        <p className="text-gray-500 mt-1">ملخص اليوم - {fmtDate(new Date())}</p>
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className={`grid grid-cols-1 md:grid-cols-2 ${donationsOn ? 'lg:grid-cols-4' : ''} gap-4`}>
         <StatCard
           icon={HiOutlineCash}
           label="مبيعات اليوم"
@@ -92,13 +96,13 @@ export default function Dashboard() {
           subValue={`${data.today.sales_count} عملية`}
           color="green"
         />
-        <StatCard
+        {donationsOn && <StatCard
           icon={HiOutlineHeart}
           label="تبرعات اليوم"
           value={sarSuffix(data.today.donations_total)}
           subValue={`${data.today.donations_count} تبرع`}
           color="purple"
-        />
+        />}
         <StatCard
           icon={HiOutlineShoppingCart}
           label="إجمالي المبيعات"
@@ -106,16 +110,16 @@ export default function Dashboard() {
           subValue={`${data.all_time.sales_count} عملية`}
           color="blue"
         />
-        <StatCard
+        {donationsOn && <StatCard
           icon={HiOutlineHeart}
           label="إجمالي التبرعات"
           value={sarSuffix(data.all_time.donations_total)}
           subValue={`${data.all_time.donations_count} تبرع`}
           color="orange"
-        />
+        />}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className={`grid grid-cols-1 ${donationsOn ? 'lg:grid-cols-2' : ''} gap-6`}>
         {/* Recent Sales */}
         <div className="bg-white rounded-xl shadow-sm border p-6">
           <h2 className="text-lg font-bold text-gray-800 mb-4">آخر المبيعات</h2>
@@ -126,7 +130,7 @@ export default function Dashboard() {
               {data.recent_sales.map((sale) => (
                 <div key={sale.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                   <div>
-                    <p className="font-medium text-gray-700">فاتورة #{sale.id}</p>
+                    <p className="font-medium text-gray-700">فاتورة <span dir="ltr">{sale.invoice_number}</span></p>
                     <p className="text-xs text-gray-500">
                       {sale.user_name} • {paymentMethodAr[sale.payment_method]}
                     </p>
@@ -134,7 +138,7 @@ export default function Dashboard() {
                   <div className="text-left">
                     <p className="font-bold text-bayan-green">{sale.total.toFixed(2)} <SarIcon size={13} /></p>
                     <p className="text-xs text-gray-400">
-                      {new Date(sale.created_at).toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' })}
+                      {fmtTime(sale.issued_at)}
                     </p>
                   </div>
                 </div>
@@ -144,7 +148,7 @@ export default function Dashboard() {
         </div>
 
         {/* Recent Donations */}
-        <div className="bg-white rounded-xl shadow-sm border p-6">
+        {donationsOn && <div className="bg-white rounded-xl shadow-sm border p-6">
           <h2 className="text-lg font-bold text-gray-800 mb-4">آخر التبرعات</h2>
           {data.recent_donations.length === 0 ? (
             <p className="text-gray-400 text-center py-8">لا توجد تبرعات بعد</p>
@@ -156,19 +160,19 @@ export default function Dashboard() {
                     <p className="font-medium text-gray-700">
                       {donation.donor_name || 'متبرع مجهول'}
                     </p>
-                    <p className="text-xs text-gray-500">تبرع #{donation.id}</p>
+                    <p className="text-xs text-gray-500">إيصال <span dir="ltr">{donation.receipt_number}</span></p>
                   </div>
                   <div className="text-left">
                     <p className="font-bold text-purple-600">{donation.amount.toFixed(2)} <SarIcon size={13} /></p>
                     <p className="text-xs text-gray-400">
-                      {new Date(donation.created_at).toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' })}
+                      {fmtTime(donation.issued_at)}
                     </p>
                   </div>
                 </div>
               ))}
             </div>
           )}
-        </div>
+        </div>}
       </div>
 
       {/* Low Stock Alert */}

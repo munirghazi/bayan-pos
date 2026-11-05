@@ -19,7 +19,7 @@ export function printReceipt(receiptRef) {
     <html lang="ar" dir="rtl">
       <head>
         <meta charset="UTF-8">
-        <title>إيصال - جمعية بيان</title>
+        <title>إيصال</title>
         <link rel="preconnect" href="https://fonts.googleapis.com">
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
         <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">

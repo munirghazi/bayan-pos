@@ -50,6 +50,24 @@ export default function Branches() {
     }
   };
 
+  // The code prefixes every invoice / credit note / receipt of the branch (B01-INV-000001),
+  // so it can only change before the branch issues its first document.
+  const editCode = async (loc) => {
+    if (loc.code_locked) {
+      toast.error('لا يمكن تغيير رمز الفرع بعد إصدار أول مستند منه');
+      return;
+    }
+    const code = prompt('رمز الفرع (حروف إنجليزية كبيرة وأرقام، حتى 6) — يظهر في أرقام الفواتير:', loc.code || '');
+    if (!code || !code.trim()) return;
+    try {
+      await locationsAPI.update(loc.id, { code: code.trim().toUpperCase() });
+      toast.success('تم تحديث رمز الفرع');
+      loadData();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'خطأ في التحديث');
+    }
+  };
+
   const renameBranch = async (loc) => {
     const name = prompt('اسم الفرع الجديد:', loc.name);
     if (!name || !name.trim()) return;
@@ -159,6 +177,14 @@ export default function Branches() {
                 <div className="flex items-center gap-2 font-bold text-gray-800">
                   <HiOutlineOfficeBuilding className="text-bayan-green text-xl" />
                   {loc.name}
+                  <button
+                    onClick={() => editCode(loc)}
+                    title={loc.code_locked ? 'رمز الفرع مثبّت (صدرت منه مستندات)' : 'تعديل رمز الفرع'}
+                    className={`text-xs font-mono px-2 py-0.5 rounded border ${loc.code_locked ? 'border-gray-300 text-gray-500 cursor-default' : 'border-bayan-green text-bayan-green hover:bg-bayan-light'}`}
+                    dir="ltr"
+                  >
+                    {loc.code}
+                  </button>
                 </div>
                 <div className="flex items-center gap-2">
                   <button onClick={() => renameBranch(loc)} className="text-blue-500 hover:text-blue-700 p-1">

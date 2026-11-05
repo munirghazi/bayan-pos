@@ -35,7 +35,7 @@ def test_register_close_zreport_and_variance(client):
     for qty, method in [(1, "cash"), (2, "cash"), (1, "card")]:
         r = client.post("/api/sales/", headers=hh, json={
             "items": [{"product_id": prod, "quantity": qty}],
-            "payment_method": method, "register_id": rid})
+            "payment_method": method, "register_id": rid, "card_ref": "AUTH123" if method == "card" else None})
         assert r.status_code == 200, r.text
     # preview z-report
     z = client.get(f"/api/registers/{rid}/z-report", headers=hh).json()

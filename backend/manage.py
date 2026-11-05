@@ -88,6 +88,9 @@ def cmd_delete(db, args):
               f"data (users, products, sales, ...). Re-run with --yes to confirm.")
         return
     _pin(db, t.id)          # allow RLS-scoped cascade of its rows
+    # Issued invoices / credit notes / donation receipts are immutable (DB trigger);
+    # a deliberate whole-tenant purge is the only exception.
+    db.execute(text("SELECT set_config('app.allow_purge', 'on', true)"))
     db.delete(t)
     db.commit()
     print(f"Deleted tenant '{args.slug}' and all its data.")

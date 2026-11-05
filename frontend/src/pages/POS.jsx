@@ -49,6 +49,7 @@ export default function POS() {
   const [lastSale, setLastSale] = useState(null);
   const [showReceipt, setShowReceipt] = useState(false);
   const [showDonation, setShowDonation] = useState(false);
+  const [donationMethod, setDonationMethod] = useState('');
   const [donationAmount, setDonationAmount] = useState('');
   const [donorName, setDonorName] = useState('');
   const [donationNote, setDonationNote] = useState('');
@@ -90,6 +91,21 @@ export default function POS() {
     const methods = ALL_PAYMENT_METHODS.filter((m) => posSettings.paymentMethods[m.key]);
     return methods.length > 0 ? methods : ALL_PAYMENT_METHODS;
   }, [posSettings.paymentMethods]);
+
+  // Donations: POS terminal (card) or bank transfer only — never cash.
+  const donationPaymentMethods = useMemo(
+    () => ALL_PAYMENT_METHODS.filter((m) => m.key !== 'cash' && posSettings.paymentMethods[m.key]),
+    [posSettings.paymentMethods],
+  );
+
+  const openDonation = () => {
+    if (cart.length > 0) {
+      toast.error('أكمل البيع أو أفرغ السلة أولاً — لا يُجمع التبرع مع البيع في عملية واحدة');
+      return;
+    }
+    setDonationMethod(donationPaymentMethods[0]?.key || '');
+    setShowDonation(true);
+  };
 
   useEffect(() => {
     loadProducts();
@@ -350,7 +366,7 @@ export default function POS() {
       setSelectedCustomer(null);
       loadProducts();
       loadConsignLots();
-      toast.success('تمت عملية البيع بنجاح');
+      toast.success(`تم إصدار الفاتورة ${res.data.invoice_number}`);
     } catch (err) {
       toast.error(apiError(err, 'خطأ في عملية البيع'));
     } finally {
@@ -366,7 +382,11 @@ export default function POS() {
       return;
     }
 
-    if (paymentMethod === 'card' && !donationCardRef.trim()) {
+    if (!donationPaymentMethods.some((m) => m.key === donationMethod)) {
+      toast.error('اختر طريقة الدفع: شبكة أو تحويل بنكي');
+      return;
+    }
+    if (donationMethod === 'card' && !donationCardRef.trim()) {
       toast.error('الرجاء إدخال رمز العملية');
       return;
     }
@@ -378,8 +398,9 @@ export default function POS() {
         donor_name: donorName || null,
         amount,
         note: donationNote || null,
-        payment_method: paymentMethod,
-        card_ref: paymentMethod === 'card' ? donationCardRef.trim() : null,
+        payment_method: donationMethod,
+        card_ref: donationMethod === 'card' ? donationCardRef.trim() : null,
+        register_id: registerId ? parseInt(registerId) : null,
       }, donationIdemRef.current);
       donationIdemRef.current = null;
 
@@ -393,7 +414,7 @@ export default function POS() {
       setDonationCardRef('');
       toast.success('تم تسجيل التبرع بنجاح - جزاكم الله خيراً');
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'خطأ في تسجيل التبرع');
+      toast.error(apiError(err, 'خطأ في تسجيل التبرع'));
     } finally {
       setLoading(false);
     }
@@ -404,8 +425,8 @@ export default function POS() {
   };
 
   const getInvoiceFilename = () => {
-    if (lastSale) return `فاتورة_${lastSale.id}`;
-    if (lastDonation) return `إيصال_تبرع_${lastDonation.id}`;
+    if (lastSale) return `فاتورة_${lastSale.invoice_number}`;
+    if (lastDonation) return `إيصال_تبرع_${lastDonation.receipt_number}`;
     return 'إيصال';
   };
 
@@ -478,10 +499,12 @@ export default function POS() {
               className="w-full pr-10 pl-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-bayan-green focus:border-transparent outline-none"
             />
           </div>
-          {posSettings.showDonation && caps.donations_enabled && (
+          {posSettings.showDonation && caps.donations_enabled && donationPaymentMethods.length > 0 && (
             <button
-              onClick={() => setShowDonation(true)}
-              className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-xl transition-all font-medium"
+              onClick={openDonation}
+              disabled={cart.length > 0}
+              title={cart.length > 0 ? 'أكمل البيع أو أفرغ السلة أولاً' : 'تسجيل تبرع'}
+              className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-xl transition-all font-medium disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <HiOutlineHeart className="text-xl" />
               تبرع
@@ -783,14 +806,15 @@ export default function POS() {
                 />
               </div>
 
-              {/* Payment method */}
-              <div className={`grid gap-2 ${enabledPaymentMethods.length === 1 ? 'grid-cols-1' : enabledPaymentMethods.length === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
-                {enabledPaymentMethods.map(({ key, icon: Icon, label }) => (
+              {/* Payment method — donations: card / bank transfer only */}
+              <p className="text-xs text-gray-500">لا تُقبل التبرعات نقداً — الدفع بالشبكة أو التحويل البنكي</p>
+              <div className={`grid gap-2 ${donationPaymentMethods.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                {donationPaymentMethods.map(({ key, icon: Icon, label }) => (
                   <button
                     key={key}
-                    onClick={() => setPaymentMethod(key)}
+                    onClick={() => setDonationMethod(key)}
                     className={`flex flex-col items-center gap-1 py-2 rounded-lg border-2 transition-all text-sm ${
-                      paymentMethod === key
+                      donationMethod === key
                         ? 'border-purple-500 bg-purple-50 text-purple-700'
                         : 'border-gray-200 text-gray-500 hover:border-gray-300'
                     }`}
@@ -802,7 +826,7 @@ export default function POS() {
               </div>
 
               {/* Card reference for donation */}
-              {paymentMethod === 'card' && (
+              {donationMethod === 'card' && (
                 <div>
                   <input
                     type="text"

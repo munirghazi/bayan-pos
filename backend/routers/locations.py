@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import text
 from sqlalchemy.orm import Session
+import re
 
 from datetime import datetime
 from database import get_db, Location, Register, RegisterClosing, Sale
@@ -15,17 +17,21 @@ registers_router = APIRouter()   # mounted at /api/registers
 
 class LocationCreate(BaseModel):
     name: str
+    code: str | None = None       # optional; auto B01, B02 … when omitted
 
 
 class LocationUpdate(BaseModel):
     name: str | None = None
+    code: str | None = None       # editable only until the branch issues its first document
     is_active: bool | None = None
 
 
 class LocationResponse(BaseModel):
     id: int
     name: str
+    code: str | None = None
     is_active: bool
+    code_locked: bool = False
 
     class Config:
         from_attributes = True
@@ -63,19 +69,47 @@ def _register_dict(reg: Register) -> dict:
 
 # ===================== Locations =====================
 
+_CODE_RE = re.compile(r"^[A-Z0-9]{1,6}$")
+
+
+def _code_locked(db, location_id: int) -> bool:
+    return db.execute(text(
+        "SELECT EXISTS (SELECT 1 FROM document_sequences WHERE location_id = :l AND last_value > 0)"),
+        {"l": location_id}).scalar()
+
+
+def _loc_dict(db, loc: Location) -> dict:
+    return {"id": loc.id, "name": loc.name, "code": loc.code, "is_active": loc.is_active,
+            "code_locked": _code_locked(db, loc.id)}
+
+
+def _clean_code(db, code: str, exclude_id: int | None = None) -> str:
+    c = (code or "").strip().upper()
+    if not _CODE_RE.match(c):
+        raise HTTPException(status_code=400, detail="رمز الفرع: حروف إنجليزية كبيرة وأرقام فقط (حتى 6)")
+    q = db.query(Location).filter(Location.code == c)
+    if exclude_id is not None:
+        q = q.filter(Location.id != exclude_id)
+    if q.first():
+        raise HTTPException(status_code=400, detail="رمز الفرع مستخدم لفرع آخر")
+    return c
+
+
 @router.get("/", response_model=list[LocationResponse])
 def list_locations(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    return db.query(Location).filter(Location.is_active == True).all()  # noqa: E712
+    return [_loc_dict(db, l) for l in
+            db.query(Location).filter(Location.is_active == True).order_by(Location.id).all()]  # noqa: E712
 
 
 @router.post("/", response_model=LocationResponse)
 def create_location(req: LocationCreate, db: Session = Depends(get_db),
                     user: User = Depends(require_admin)):
-    loc = Location(name=req.name)  # tenant_id filled by DB default
+    code = _clean_code(db, req.code) if req.code else None
+    loc = Location(name=req.name, code=code)  # tenant_id: DB default; code: DB trigger if None
     db.add(loc)
     db.commit()
     db.refresh(loc)
-    return loc
+    return _loc_dict(db, loc)
 
 
 @router.put("/{location_id}", response_model=LocationResponse)
@@ -86,11 +120,16 @@ def update_location(location_id: int, req: LocationUpdate, db: Session = Depends
         raise HTTPException(status_code=404, detail="الفرع غير موجود")
     if req.name is not None:
         loc.name = req.name
+    if req.code is not None and req.code.strip().upper() != loc.code:
+        if _code_locked(db, loc.id):
+            raise HTTPException(status_code=400,
+                                detail="لا يمكن تغيير رمز الفرع بعد إصدار أول مستند منه (تسلسل الفواتير)")
+        loc.code = _clean_code(db, req.code, exclude_id=loc.id)
     if req.is_active is not None:
         loc.is_active = req.is_active
     db.commit()
     db.refresh(loc)
-    return loc
+    return _loc_dict(db, loc)
 
 
 @router.delete("/{location_id}")

@@ -15,10 +15,11 @@ session variable, so existing routers need no changes to stay tenant-safe.
 from datetime import datetime
 
 from sqlalchemy import (
-    create_engine, event, text,
+    create_engine, event, text, FetchedValue,
     Column, Integer, String, Float, Numeric, Boolean, DateTime, Date, ForeignKey, Text,
     UniqueConstraint,
 )
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
 from config import settings
@@ -31,6 +32,8 @@ Base = declarative_base()
 
 # Quantities/stock: exact NUMERIC(14,3) storage, float in Python (fractional units).
 _QTY = Numeric(14, 3, asdecimal=False)
+_MONEY = Numeric(12, 2, asdecimal=False)     # stored exact, read as float
+_UNIT = Numeric(12, 4, asdecimal=False)
 
 # SQL expression used both as the column DEFAULT and inside RLS policies.
 _TENANT_GUC = "NULLIF(current_setting('app.current_tenant', true), '')::integer"
@@ -168,13 +171,28 @@ class Product(Base):
 
 
 class Sale(Base):
+    """A simplified tax invoice (B2C). Immutable once issued (DB trigger)."""
     __tablename__ = "sales"
     id = Column(Integer, primary_key=True, index=True)
     tenant_id = _tenant_col()
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     register_id = Column(Integer, ForeignKey("registers.id"), nullable=True)  # where the sale happened
+    location_id = Column(Integer, ForeignKey("locations.id"), nullable=False)  # branch (numbering)
     customer_id = Column(Integer, ForeignKey("customers.id"), nullable=True)  # optional buyer
-    total = Column(Float, nullable=False)
+    invoice_number = Column(String(30), nullable=False)       # B01-INV-000001
+    invoice_seq = Column(Integer, nullable=False)             # counter within the branch (ICV)
+    invoice_type = Column(String(12), nullable=False, default="simplified")
+    is_tax_invoice = Column(Boolean, nullable=False, default=True)
+    uuid = Column(UUID(as_uuid=False), nullable=False)
+    previous_hash = Column(String(100), nullable=True)
+    invoice_hash = Column(String(100), nullable=False)
+    issued_at = Column(DateTime(timezone=True), nullable=False)
+    subtotal = Column(_MONEY, nullable=False)                 # total excl. VAT
+    vat_amount = Column(_MONEY, nullable=False)
+    exempt_amount = Column(_MONEY, nullable=False, default=0)
+    total = Column(_MONEY, nullable=False)                    # incl. VAT
+    seller = Column(JSONB, nullable=False)                    # seller identity at issue time
+    qr_data = Column(Text, nullable=True)                     # ZATCA TLV base64 (tax invoices)
     payment_method = Column(String(20), nullable=False)
     card_ref = Column(String(100), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -182,6 +200,7 @@ class Sale(Base):
     user = relationship("User", back_populates="sales")
     items = relationship("SaleItem", back_populates="sale", cascade="all, delete-orphan")
     customer = relationship("Customer")
+    location = relationship("Location")
 
 
 class SaleItem(Base):
@@ -192,8 +211,13 @@ class SaleItem(Base):
     product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
     quantity = Column(_QTY, nullable=False)               # in the selling unit (uom_id)
     uom_id = Column(Integer, ForeignKey("uoms.id"), nullable=True)
-    price = Column(Float, nullable=False)                 # per selling unit
+    price = Column(_UNIT, nullable=False)                 # per selling unit, VAT-inclusive
     is_tax_exempt = Column(Boolean, default=False)
+    product_name = Column(String(200), nullable=True)     # snapshot at issue time
+    uom_name = Column(String(50), nullable=True)
+    vat_rate = Column(_MONEY, nullable=False, default=0)  # percent
+    line_total = Column(_MONEY, nullable=False)           # incl. VAT
+    line_vat = Column(_MONEY, nullable=False, default=0)
     consignment_item_id = Column(Integer, ForeignKey("consignment_items.id"), nullable=True)
 
     sale = relationship("Sale", back_populates="items")
@@ -202,18 +226,30 @@ class SaleItem(Base):
 
 
 class Donation(Base):
+    """A donation RECEIPT (not a tax invoice). Card / transfer only.
+    Never deleted: an admin may void it with a reason (DB trigger enforces)."""
     __tablename__ = "donations"
     id = Column(Integer, primary_key=True, index=True)
     tenant_id = _tenant_col()
+    location_id = Column(Integer, ForeignKey("locations.id"), nullable=False)
+    register_id = Column(Integer, ForeignKey("registers.id"), nullable=True)
+    receipt_number = Column(String(30), nullable=False)      # B01-DON-000001
+    receipt_seq = Column(Integer, nullable=False)
+    issued_at = Column(DateTime(timezone=True), nullable=False)
     donor_name = Column(String(200), nullable=True)
-    amount = Column(Float, nullable=False)
+    amount = Column(_MONEY, nullable=False)
     note = Column(Text, nullable=True)
-    payment_method = Column(String(20), nullable=False, default="cash")
+    payment_method = Column(String(20), nullable=False)
     card_ref = Column(String(100), nullable=True)
+    status = Column(String(10), nullable=False, default="issued")   # issued | void
+    void_reason = Column(String(300), nullable=True)
+    voided_at = Column(DateTime(timezone=True), nullable=True)
+    voided_by = Column(String(100), nullable=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="donations")
+    location = relationship("Location")
 
 
 class KitComponent(Base):
@@ -436,8 +472,20 @@ class Return(Base):
     sale_id = Column(Integer, ForeignKey("sales.id"), nullable=False, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     register_id = Column(Integer, ForeignKey("registers.id"), nullable=True)
-    credit_note_number = Column(Integer, nullable=False)   # per-tenant sequential
-    total = Column(Float, nullable=False)                  # amount refunded
+    location_id = Column(Integer, ForeignKey("locations.id"), nullable=False)  # = original invoice's branch
+    credit_note_number = Column(String(30), nullable=False)  # B01-CN-000001
+    credit_note_seq = Column(Integer, nullable=False)
+    original_invoice_number = Column(String(30), nullable=True)
+    is_tax_invoice = Column(Boolean, nullable=False, default=True)
+    uuid = Column(UUID(as_uuid=False), nullable=False)
+    previous_hash = Column(String(100), nullable=True)
+    invoice_hash = Column(String(100), nullable=False)
+    issued_at = Column(DateTime(timezone=True), nullable=False)
+    subtotal = Column(_MONEY, nullable=False)
+    vat_amount = Column(_MONEY, nullable=False)
+    total = Column(_MONEY, nullable=False)                   # amount refunded incl. VAT
+    seller = Column(JSONB, nullable=False)
+    qr_data = Column(Text, nullable=True)
     reason = Column(String(300), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -454,7 +502,11 @@ class ReturnItem(Base):
                        nullable=False, index=True)
     product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
     quantity = Column(_QTY, nullable=False)
-    price = Column(Float, nullable=False)                   # unit price at sale time
+    price = Column(_UNIT, nullable=False)                   # unit price at sale time
+    product_name = Column(String(200), nullable=True)
+    vat_rate = Column(_MONEY, nullable=False, default=0)
+    line_total = Column(_MONEY, nullable=False)
+    line_vat = Column(_MONEY, nullable=False, default=0)
 
     return_ref = relationship("Return", back_populates="items")
     product = relationship("Product")
@@ -486,6 +538,7 @@ class Location(Base):
     id = Column(Integer, primary_key=True, index=True)
     tenant_id = _tenant_col()
     name = Column(String(150), nullable=False)
+    code = Column(String(10), nullable=True, server_default=FetchedValue())   # B01… — assigned by DB trigger, unique per tenant
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 

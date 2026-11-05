@@ -58,7 +58,7 @@ def test_sell_in_pack_unit_deducts_base_and_prices_per_pack(client):
     assert any(m["type"] == "out" and m["qty"] == -27 for m in mv)
 
     # return 1 شرنك -> restock 27 -> back to 100
-    r = client.post("/api/returns/", headers=h, json={
+    r = client.post("/api/returns/", headers=h, json={"reason": "اختبار", 
         "sale_id": body["id"], "items": [{"product_id": pid, "quantity": 1}]})
     assert r.status_code == 200, r.text
     assert stock_of(client, h, pid) == 100

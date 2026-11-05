@@ -4,7 +4,7 @@ import { Toaster } from 'react-hot-toast';
 import Sidebar from './components/Sidebar';
 import { authAPI, settingsAPI } from './services/api';
 import { applyTheme, storeTheme } from './utils/theme';
-import { saveCapabilities } from './utils/posSettings';
+import { saveCapabilities, getCapabilities } from './utils/posSettings';
 import { syncZATCAFromTenant } from './utils/zatca';
 import Login from './pages/Login';
 import ChangePassword from './pages/ChangePassword';
@@ -53,6 +53,11 @@ function ProtectedLayout() {
   );
 }
 
+// A page whose feature is switched off for this tenant is unreachable, even by URL.
+function RequireCap({ flag, children }) {
+  return getCapabilities()[flag] ? children : <Navigate to="/" replace />;
+}
+
 function PublicRoute({ children }) {
   const token = localStorage.getItem('token');
   if (token) return <Navigate to="/" replace />;
@@ -93,7 +98,7 @@ export default function App() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/pos" element={<POS />} />
           <Route path="/products" element={<Catalog />} />
-          <Route path="/donations" element={<Donations />} />
+          <Route path="/donations" element={<RequireCap flag="donations_enabled"><Donations /></RequireCap>} />
           <Route path="/reports" element={<Reports />} />
           <Route path="/branches" element={<Branches />} />
           <Route path="/register-closing" element={<RegisterClosing />} />

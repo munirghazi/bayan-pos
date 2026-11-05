@@ -93,12 +93,12 @@ def test_refund_requires_admin_and_is_audited(client):
 
     # cashier cannot refund
     denied = client.post("/api/returns/", headers=ch,
-                         json={"sale_id": sale["id"], "items": [{"product_id": prod, "quantity": 1}]})
+                         json={"reason": "اختبار", "sale_id": sale["id"], "items": [{"product_id": prod, "quantity": 1}]})
     assert denied.status_code in (401, 403)
 
     # admin can, and it is audited
     ok = client.post("/api/returns/", headers=h,
-                     json={"sale_id": sale["id"], "items": [{"product_id": prod, "quantity": 1}]})
+                     json={"reason": "اختبار", "sale_id": sale["id"], "items": [{"product_id": prod, "quantity": 1}]})
     assert ok.status_code == 200, ok.text
     c = psycopg2.connect(RAW_DSN); c.autocommit = True; cur = c.cursor()
     cur.execute("SELECT id FROM tenants WHERE slug='bayan'")

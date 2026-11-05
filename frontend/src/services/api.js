@@ -66,6 +66,7 @@ export const salesAPI = {
   create: (data, idemKey) => api.post('/sales/', data, idemKey ? { headers: { 'Idempotency-Key': idemKey } } : undefined),
   getAll: (skip = 0, limit = 50) => api.get(`/sales/?skip=${skip}&limit=${limit}`),
   get: (id) => api.get(`/sales/${id}`),
+  getByNumber: (number) => api.get(`/sales/by-number/${encodeURIComponent(number)}`),
 };
 
 // ===================== Donations =====================
@@ -73,7 +74,7 @@ export const donationsAPI = {
   create: (data, idemKey) => api.post('/donations/', data, idemKey ? { headers: { 'Idempotency-Key': idemKey } } : undefined),
   getAll: (skip = 0, limit = 50) => api.get(`/donations/?skip=${skip}&limit=${limit}`),
   get: (id) => api.get(`/donations/${id}`),
-  delete: (id) => api.delete(`/donations/${id}`),
+  void: (id, reason) => api.post(`/donations/${id}/void`, { reason }),
 };
 
 // ===================== Reports =====================
@@ -161,6 +162,7 @@ export const consignmentAPI = {
 
 export const returnsAPI = {
   getForSale: (saleId) => api.get(`/returns/sale/${saleId}`),
+  getForInvoice: (number) => api.get(`/returns/invoice/${encodeURIComponent(number)}`),
   getAll: () => api.get('/returns/'),
   get: (id) => api.get(`/returns/${id}`),
   create: (data) => api.post('/returns/', data),

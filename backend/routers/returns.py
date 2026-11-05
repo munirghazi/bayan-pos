@@ -8,6 +8,7 @@ from routers.auth import get_current_user, require_admin, User
 from tenant_audit import tenant_audit
 from kits import explode_to_leaves
 from stock import record_movement, to_base_qty
+import invoicing as inv
 
 router = APIRouter()
 
@@ -20,7 +21,8 @@ class ReturnItemIn(BaseModel):
 
 
 class ReturnCreate(BaseModel):
-    sale_id: int
+    sale_id: int | None = None
+    invoice_number: str | None = None     # preferred: B01-INV-000123
     items: list[ReturnItemIn]
     reason: str | None = None
     register_id: int | None = None
@@ -43,22 +45,55 @@ def _format_return(r: Return) -> dict:
         "id": r.id,
         "sale_id": r.sale_id,
         "credit_note_number": r.credit_note_number,
-        "total": r.total,
+        "original_invoice_number": r.original_invoice_number,
+        "is_tax_invoice": r.is_tax_invoice,
+        "uuid": str(r.uuid),
+        "location_id": r.location_id,
+        "subtotal": inv.money(r.subtotal),
+        "vat_amount": inv.money(r.vat_amount),
+        "total": inv.money(r.total),
         "reason": r.reason,
+        "seller": r.seller or {},
+        "qr_data": r.qr_data,
+        "original_issued_at": r.sale.issued_at if r.sale else None,
+        "issued_at": r.issued_at,
         "created_at": r.created_at,
         "items": [
             {
                 "product_id": i.product_id,
-                "product_name": i.product.name if i.product else None,
+                "product_name": i.product_name or (i.product.name if i.product else None),
                 "quantity": i.quantity,
-                "price": i.price,
+                "price": float(i.price),
+                "vat_rate": float(i.vat_rate or 0),
+                "line_total": inv.money(i.line_total),
+                "line_vat": inv.money(i.line_vat),
             }
             for i in r.items
         ],
     }
 
 
+def _find_sale(db: Session, sale_id: int | None, invoice_number: str | None) -> Sale:
+    q = db.query(Sale)
+    if invoice_number:
+        sale = q.filter(Sale.invoice_number == invoice_number.strip().upper()).first()
+    elif sale_id is not None:
+        sale = q.filter(Sale.id == sale_id).first()
+    else:
+        raise HTTPException(status_code=400, detail="حدد رقم الفاتورة")
+    if not sale:
+        raise HTTPException(status_code=404, detail="الفاتورة غير موجودة")
+    return sale
+
+
 # ===================== Routes =====================
+
+@router.get("/invoice/{invoice_number}")
+def returnable_by_number(invoice_number: str, db: Session = Depends(get_db),
+                         user: User = Depends(get_current_user)):
+    sale = _find_sale(db, None, invoice_number)
+    return returnable(sale.id, db, user)
+
 
 @router.get("/sale/{sale_id}")
 def returnable(sale_id: int, db: Session = Depends(get_db),
@@ -74,13 +109,14 @@ def returnable(sale_id: int, db: Session = Depends(get_db),
         ret = already.get(si.product_id, 0)
         lines.append({
             "product_id": si.product_id,
-            "product_name": prod.name if prod else None,
-            "price": si.price,
+            "product_name": si.product_name or (prod.name if prod else None),
+            "price": float(si.price),
             "sold": si.quantity,
             "returned": ret,
             "remaining": si.quantity - ret,
         })
-    return {"sale_id": sale_id, "total": sale.total, "items": lines}
+    return {"sale_id": sale_id, "invoice_number": sale.invoice_number,
+            "issued_at": sale.issued_at, "total": inv.money(sale.total), "items": lines}
 
 
 @router.get("/")
@@ -103,17 +139,17 @@ def create_return(req: ReturnCreate, db: Session = Depends(get_db),
                   user: User = Depends(require_admin)):
     if not req.items:
         raise HTTPException(status_code=400, detail="يجب تحديد صنف واحد على الأقل")
+    if not (req.reason or "").strip():
+        # ZATCA: a credit note must state the reason it was issued.
+        raise HTTPException(status_code=400, detail="سبب الإرجاع مطلوب لإصدار الإشعار الدائن")
 
-    sale = db.query(Sale).filter(Sale.id == req.sale_id).first()
-    if not sale:
-        raise HTTPException(status_code=404, detail="الفاتورة غير موجودة")
+    sale = _find_sale(db, req.sale_id, req.invoice_number)
 
     sold = {si.product_id: si for si in
             db.query(SaleItem).filter(SaleItem.sale_id == sale.id).all()}
     already = _returned_map(db, sale.id)
 
     leaf_restock: dict[int, int] = {}
-    total = 0.0
     validated = []
     for it in req.items:
         if it.quantity <= 0:
@@ -130,24 +166,57 @@ def create_return(req: ReturnCreate, db: Session = Depends(get_db),
             name = prod.name if prod else it.product_id
             raise HTTPException(status_code=400,
                                 detail=f"الكمية المرتجعة من '{name}' تتجاوز المتبقي ({remaining})")
-        total += si.price * it.quantity
         product = db.query(Product).filter(Product.id == it.product_id).first()
         # Reverse the sale's stock math in BASE units (convert from the sold unit).
         base_qty = it.quantity if product.is_kit else to_base_qty(db, product, it.quantity, si.uom_id)
         explode_to_leaves(db, product, base_qty, leaf_restock)
-        validated.append((it.product_id, it.quantity, si.price))
+        validated.append({"product_id": it.product_id, "quantity": it.quantity,
+                          "price": si.price, "vat_rate": inv.d(si.vat_rate or 0),
+                          "name": si.product_name or (product.name if product else None)})
 
-    next_no = (db.query(func.coalesce(func.max(Return.credit_note_number), 0)).scalar() or 0) + 1
+    # ---- issue the credit note: in the ORIGINAL invoice's branch, at the ORIGINAL VAT rates
+    lines, total, vat = [], inv.d(0), inv.d(0)
+    for v in validated:
+        lt = inv.q2(inv.d(v["price"]) * inv.d(v["quantity"]))
+        r = v["vat_rate"]
+        lv = inv.q2(lt - lt / (1 + r / 100)) if r else inv.d(0)
+        lines.append({**v, "line_total": lt, "line_vat": lv})
+        total += lt
+        vat += lv
+    total, vat = inv.q2(total), inv.q2(vat)
+    seller = dict(sale.seller or {})
+    if not seller:
+        seller = inv.seller_snapshot(db)
+    alloc = inv.allocate(db, sale.location_id, inv.DOC_CREDIT_NOTE)
+    issued_at = inv.utcnow()
+    uid = inv.new_uuid()
+    doc_hash = inv.document_hash({
+        "type": inv.DOC_CREDIT_NOTE, "number": alloc.number, "uuid": uid, "icv": alloc.seq,
+        "pih": alloc.previous_hash, "issued_at": issued_at, "ref": sale.invoice_number,
+        "seller_vat": seller.get("vat_number"), "total": total, "vat": vat,
+        "lines": [{"name": ln["name"], "qty": inv.d(ln["quantity"]), "price": inv.d(ln["price"]),
+                   "vat": ln["line_vat"]} for ln in lines],
+    })
+    qr = (inv.zatca_qr(seller.get("name"), seller.get("vat_number"), issued_at, total, vat)
+          if sale.is_tax_invoice else None)
 
     ret = Return(
         sale_id=sale.id, user_id=user.id, register_id=req.register_id,
-        credit_note_number=next_no, total=round(total, 2), reason=req.reason,
+        location_id=sale.location_id,
+        credit_note_number=alloc.number, credit_note_seq=alloc.seq,
+        original_invoice_number=sale.invoice_number, is_tax_invoice=sale.is_tax_invoice,
+        uuid=uid, previous_hash=alloc.previous_hash, invoice_hash=doc_hash, issued_at=issued_at,
+        subtotal=total - vat, vat_amount=vat, total=total, seller=seller, qr_data=qr,
+        reason=(req.reason or "").strip() or None,
     )
     db.add(ret)
     db.flush()
 
-    for pid, qty, price in validated:
-        db.add(ReturnItem(return_id=ret.id, product_id=pid, quantity=qty, price=price))
+    for ln in lines:
+        db.add(ReturnItem(return_id=ret.id, product_id=ln["product_id"], product_name=ln["name"],
+                          quantity=ln["quantity"], price=ln["price"], vat_rate=ln["vat_rate"],
+                          line_total=ln["line_total"], line_vat=ln["line_vat"]))
+    inv.commit_allocation(db, alloc, doc_hash)
 
     for leaf_id, qty in leaf_restock.items():
         leaf = db.query(Product).filter(Product.id == leaf_id).first()

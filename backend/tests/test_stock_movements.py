@@ -62,7 +62,7 @@ def test_sale_and_return_write_movements(client):
     pid = client.post("/api/products/", headers=h, json={"name": "زبادي", "price": 6, "stock": 20}).json()["id"]
     sale = client.post("/api/sales/", headers=h, json={
         "items": [{"product_id": pid, "quantity": 3}], "payment_method": "cash"}).json()
-    r = client.post("/api/returns/", headers=h, json={
+    r = client.post("/api/returns/", headers=h, json={"reason": "اختبار", 
         "sale_id": sale["id"], "items": [{"product_id": pid, "quantity": 1}]})
     assert r.status_code == 200, r.text
 

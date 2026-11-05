@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { reportsAPI } from '../services/api';
+import { reportsAPI, salesAPI, donationsAPI, apiError } from '../services/api';
+import { getCapabilities } from '../utils/posSettings';
+import { fmtDateTime } from '../utils/datetime';
 import { SarIcon, SAR_TEXT } from '../components/SarIcon';
 import Receipt from '../components/Receipt';
 import { printReceipt } from '../utils/printReceipt';
@@ -18,9 +20,13 @@ import {
 } from 'react-icons/hi';
 
 const paymentMethodAr = { cash: 'نقدي', card: 'شبكة', transfer: 'تحويل' };
+const riyadhToday = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Riyadh' });
 
 export default function Reports() {
-  const [activeTab, setActiveTab] = useState('sales');
+  const caps = getCapabilities();
+  const donationsOn = !!caps.donations_enabled;
+  const salesOn = caps.sales_enabled !== false;
+  const [activeTab, setActiveTab] = useState(salesOn || !donationsOn ? 'sales' : 'donations');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [salesData, setSalesData] = useState(null);
@@ -36,7 +42,7 @@ export default function Reports() {
 
   useEffect(() => {
     // Default: today
-    const today = new Date().toISOString().split('T')[0];
+    const today = riyadhToday();
     setStartDate(today);
     setEndDate(today);
   }, []);
@@ -53,7 +59,7 @@ export default function Reports() {
       if (activeTab === 'sales') {
         const res = await reportsAPI.getSalesReport(startDate, endDate);
         setSalesData(res.data);
-      } else {
+      } else if (donationsOn) {
         const res = await reportsAPI.getDonationsReport(startDate, endDate);
         setDonationsData(res.data);
       }
@@ -70,11 +76,11 @@ export default function Reports() {
 
     if (activeTab === 'sales' && salesData) {
       csv = '\uFEFF'; // BOM for Arabic
-      csv += `رقم الفاتورة,المنتجات,المجموع (${SAR_TEXT}),طريقة الدفع,عدد المنتجات,الموظف,التاريخ\n`;
+      csv += `رقم الفاتورة,المنتجات,غير شامل الضريبة (${SAR_TEXT}),الضريبة (${SAR_TEXT}),الإجمالي (${SAR_TEXT}),طريقة الدفع,عدد المنتجات,الموظف,التاريخ\n`;
       salesData.sales.forEach((s) => {
         // Escape product summary for CSV (replace commas with semicolons)
         const productsSafe = (s.products_summary || '').replace(/,/g, '؛');
-        csv += `${s.id},"${productsSafe}",${s.total},${paymentMethodAr[s.payment_method]},${s.items_count},${s.user_name},${new Date(s.created_at).toLocaleDateString('ar-SA')}\n`;
+        csv += `${s.invoice_number},"${productsSafe}",${s.subtotal},${s.vat_amount},${s.total},${paymentMethodAr[s.payment_method]},${s.items_count},${s.user_name},"${fmtDateTime(s.issued_at)}"\n`;
       });
 
       // Add detailed items section
@@ -83,17 +89,27 @@ export default function Reports() {
       salesData.sales.forEach((s) => {
         if (s.items) {
           s.items.forEach((item) => {
-            csv += `${s.id},${item.product_name},${item.quantity},${item.price},${item.subtotal}\n`;
+            csv += `${s.invoice_number},${item.product_name},${item.quantity},${item.price},${item.subtotal}\n`;
           });
         }
       });
 
+      if (salesData.credit_notes?.length) {
+        csv += '\n\n--- الإشعارات الدائنة ---\n';
+        csv += `رقم الإشعار,الفاتورة الأصلية,الضريبة (${SAR_TEXT}),المبلغ (${SAR_TEXT}),السبب,التاريخ\n`;
+        salesData.credit_notes.forEach((r) => {
+          csv += `${r.credit_note_number},${r.original_invoice_number},${r.vat_amount},${r.total},"${(r.reason || '').replace(/"/g, "'")}","${fmtDateTime(r.issued_at)}"\n`;
+        });
+      }
+      const sm = salesData.summary;
+      csv += `\n\nإجمالي المبيعات,${sm.total}\nضريبة المبيعات,${sm.vat_total}\nالإشعارات الدائنة,${sm.credit_notes_total}\nضريبة الإشعارات الدائنة,${sm.credit_notes_vat}\nصافي المبيعات,${sm.net_total}\nصافي الضريبة,${sm.net_vat}\n`;
       filename = `تقرير_المبيعات_${startDate}_${endDate}.csv`;
     } else if (donationsData) {
       csv = '\uFEFF';
-      csv += `رقم التبرع,المبلغ (${SAR_TEXT}),المتبرع,طريقة الدفع,ملاحظة,الموظف,التاريخ\n`;
+      csv += `رقم الإيصال,المبلغ (${SAR_TEXT}),المتبرع,طريقة الدفع,الحالة,ملاحظة,الموظف,التاريخ\n`;
       donationsData.donations.forEach((d) => {
-        csv += `${d.id},${d.amount},${d.donor_name || 'مجهول'},${paymentMethodAr[d.payment_method]},${d.note || '-'},${d.user_name},${new Date(d.created_at).toLocaleDateString('ar-SA')}\n`;
+        const st = d.status === 'void' ? `ملغى: ${d.void_reason || ''}` : 'صادر';
+        csv += `${d.receipt_number},${d.amount},${d.donor_name || 'مجهول'},${paymentMethodAr[d.payment_method]},"${st}",${d.note || '-'},${d.user_name},"${fmtDateTime(d.issued_at)}"\n`;
       });
       filename = `تقرير_التبرعات_${startDate}_${endDate}.csv`;
     }
@@ -111,17 +127,28 @@ export default function Reports() {
 
   // ========== Reprint functions ==========
 
-  const handleReprintSale = (sale, e) => {
+  // Reprints load the full stored document, so the copy is identical to the original.
+  const handleReprintSale = async (sale, e) => {
     e.stopPropagation(); // Don't toggle expand
-    setSelectedSale(sale);
-    setSelectedDonation(null);
-    setShowReceipt(true);
+    try {
+      const { data } = await salesAPI.get(sale.id);
+      setSelectedSale(data);
+      setSelectedDonation(null);
+      setShowReceipt(true);
+    } catch (err) {
+      toast.error(apiError(err, 'تعذّر تحميل الفاتورة'));
+    }
   };
 
-  const handleReprintDonation = (donation) => {
-    setSelectedDonation(donation);
-    setSelectedSale(null);
-    setShowReceipt(true);
+  const handleReprintDonation = async (donation) => {
+    try {
+      const { data } = await donationsAPI.get(donation.id);
+      setSelectedDonation(data);
+      setSelectedSale(null);
+      setShowReceipt(true);
+    } catch (err) {
+      toast.error(apiError(err, 'تعذّر تحميل الإيصال'));
+    }
   };
 
   const handlePrint = () => {
@@ -135,8 +162,8 @@ export default function Reports() {
     }
 
     const filename = selectedSale
-      ? `فاتورة_رقم_${selectedSale.id}.pdf`
-      : `إيصال_تبرع_رقم_${selectedDonation.id}.pdf`;
+      ? `فاتورة_${selectedSale.invoice_number}.pdf`
+      : `إيصال_تبرع_${selectedDonation.receipt_number}.pdf`;
     const pdfBlob = await generatePDFBlob(receiptRef.current, filename);
 
     if (!pdfBlob) {
@@ -233,7 +260,7 @@ export default function Reports() {
         <div className="flex flex-wrap items-center gap-4">
           {/* Tabs */}
           <div className="flex bg-gray-100 rounded-lg p-1">
-            <button
+            {salesOn && <button
               onClick={() => setActiveTab('sales')}
               className={`px-6 py-2 rounded-lg font-medium transition-all ${
                 activeTab === 'sales'
@@ -242,8 +269,8 @@ export default function Reports() {
               }`}
             >
               المبيعات
-            </button>
-            <button
+            </button>}
+            {donationsOn && <button
               onClick={() => setActiveTab('donations')}
               className={`px-6 py-2 rounded-lg font-medium transition-all ${
                 activeTab === 'donations'
@@ -252,7 +279,7 @@ export default function Reports() {
               }`}
             >
               التبرعات
-            </button>
+            </button>}
           </div>
 
           {/* Date filters */}
@@ -305,13 +332,32 @@ export default function Reports() {
               </p>
             </div>
           </div>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="bg-white rounded-xl border p-4">
+              <p className="text-sm text-gray-500">ضريبة القيمة المضافة على المبيعات</p>
+              <p className="text-xl font-bold text-gray-800">{salesData.summary.vat_total.toFixed(2)} <SarIcon size={16} /></p>
+            </div>
+            <div className="bg-white rounded-xl border p-4">
+              <p className="text-sm text-gray-500">الإشعارات الدائنة ({salesData.summary.credit_notes_count})</p>
+              <p className="text-xl font-bold text-red-600">-{salesData.summary.credit_notes_total.toFixed(2)} <SarIcon size={16} /></p>
+              <p className="text-xs text-gray-400">منها ضريبة {salesData.summary.credit_notes_vat.toFixed(2)}</p>
+            </div>
+            <div className="bg-white rounded-xl border p-4">
+              <p className="text-sm text-gray-500">صافي المبيعات</p>
+              <p className="text-xl font-bold text-bayan-green">{salesData.summary.net_total.toFixed(2)} <SarIcon size={16} /></p>
+            </div>
+            <div className="bg-white rounded-xl border p-4">
+              <p className="text-sm text-gray-500">صافي الضريبة المستحقة</p>
+              <p className="text-xl font-bold text-gray-800">{salesData.summary.net_vat.toFixed(2)} <SarIcon size={16} /></p>
+            </div>
+          </div>
 
           {/* Sales table with expandable product details */}
           <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
             <table className="w-full">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="text-right px-6 py-3 text-sm font-medium text-gray-500">#</th>
+                  <th className="text-right px-6 py-3 text-sm font-medium text-gray-500">رقم الفاتورة</th>
                   <th className="text-right px-6 py-3 text-sm font-medium text-gray-500">المنتجات</th>
                   <th className="text-right px-6 py-3 text-sm font-medium text-gray-500">المجموع</th>
                   <th className="text-right px-6 py-3 text-sm font-medium text-gray-500">طريقة الدفع</th>
@@ -325,7 +371,7 @@ export default function Reports() {
                 {salesData.sales.map((sale) => (
                   <>
                     <tr key={sale.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => toggleExpandSale(sale.id)}>
-                      <td className="px-6 py-4 text-sm text-gray-600">{sale.id}</td>
+                      <td className="px-6 py-4 text-sm text-gray-600" dir="ltr">{sale.invoice_number}</td>
                       <td className="px-6 py-4 text-sm text-gray-700 max-w-xs">
                         <div className="truncate" title={sale.products_summary}>
                           {sale.products_summary || `${sale.items_count} منتجات`}
@@ -335,7 +381,7 @@ export default function Reports() {
                       <td className="px-6 py-4 text-sm text-gray-600">{paymentMethodAr[sale.payment_method]}</td>
                       <td className="px-6 py-4 text-sm text-gray-600">{sale.user_name}</td>
                       <td className="px-6 py-4 text-sm text-gray-600">
-                        {new Date(sale.created_at).toLocaleString('ar-SA')}
+                        {fmtDateTime(sale.issued_at)}
                       </td>
                       <td className="px-6 py-4 text-center">
                         <button
@@ -395,7 +441,7 @@ export default function Reports() {
       )}
 
       {/* Donations Report */}
-      {!loading && activeTab === 'donations' && donationsData && (
+      {!loading && donationsOn && activeTab === 'donations' && donationsData && (
         <>
           {/* Summary */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -408,8 +454,8 @@ export default function Reports() {
               <p className="text-2xl font-bold text-gray-800">{donationsData.summary.count}</p>
             </div>
             <div className="bg-white rounded-xl border p-4">
-              <p className="text-sm text-gray-500">نقدي</p>
-              <p className="text-2xl font-bold text-emerald-600">{donationsData.summary.cash_total.toFixed(2)} <SarIcon size={18} /></p>
+              <p className="text-sm text-gray-500">إيصالات ملغاة</p>
+              <p className="text-2xl font-bold text-red-600">{donationsData.summary.void_count}</p>
             </div>
             <div className="bg-white rounded-xl border p-4">
               <p className="text-sm text-gray-500">شبكة + تحويل</p>
@@ -424,7 +470,7 @@ export default function Reports() {
             <table className="w-full">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="text-right px-6 py-3 text-sm font-medium text-gray-500">#</th>
+                  <th className="text-right px-6 py-3 text-sm font-medium text-gray-500">رقم الإيصال</th>
                   <th className="text-right px-6 py-3 text-sm font-medium text-gray-500">المتبرع</th>
                   <th className="text-right px-6 py-3 text-sm font-medium text-gray-500">المبلغ</th>
                   <th className="text-right px-6 py-3 text-sm font-medium text-gray-500">طريقة الدفع</th>
@@ -436,15 +482,20 @@ export default function Reports() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {donationsData.donations.map((d) => (
-                  <tr key={d.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 text-sm text-gray-600">{d.id}</td>
+                  <tr key={d.id} className={`hover:bg-gray-50 ${d.status === 'void' ? 'opacity-60' : ''}`}>
+                    <td className="px-6 py-4 text-sm text-gray-600">
+                      <span dir="ltr">{d.receipt_number}</span>
+                      {d.status === 'void' && (
+                        <span className="mr-2 text-xs text-red-600 font-bold" title={d.void_reason || ''}>ملغى</span>
+                      )}
+                    </td>
                     <td className="px-6 py-4 font-medium">{d.donor_name || 'مجهول'}</td>
                     <td className="px-6 py-4 font-bold text-purple-600">{d.amount.toFixed(2)} <SarIcon size={13} /></td>
                     <td className="px-6 py-4 text-sm text-gray-600">{paymentMethodAr[d.payment_method]}</td>
                     <td className="px-6 py-4 text-sm text-gray-600">{d.note || '-'}</td>
                     <td className="px-6 py-4 text-sm text-gray-600">{d.user_name}</td>
                     <td className="px-6 py-4 text-sm text-gray-600">
-                      {new Date(d.created_at).toLocaleString('ar-SA')}
+                      {fmtDateTime(d.issued_at)}
                     </td>
                     <td className="px-6 py-4 text-center">
                       <button

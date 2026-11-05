@@ -51,15 +51,19 @@ def test_full_and_partial_returns_restock(client):
     assert _stock(client, h, pid) == 97
 
     # over-return (4 > remaining 3) rejected
-    bad = client.post("/api/returns/", headers=h, json={
+    bad = client.post("/api/returns/", headers=h, json={"reason": "اختبار", 
         "sale_id": sale["id"], "items": [{"product_id": pid, "quantity": 4}]})
     assert bad.status_code == 400
 
     # return remaining 3 -> stock back to 100, credit note #2
-    r2 = client.post("/api/returns/", headers=h, json={
+    r2 = client.post("/api/returns/", headers=h, json={"reason": "اختبار", 
         "sale_id": sale["id"], "items": [{"product_id": pid, "quantity": 3}]})
     assert r2.status_code == 200, r2.text
-    assert r2.json()["credit_note_number"] == n1 + 1
+    n2 = r2.json()["credit_note_number"]
+    # per-branch series: B01-CN-000001 -> B01-CN-000002 (same prefix, +1)
+    assert n1.rsplit("-", 1)[0] == n2.rsplit("-", 1)[0] and n1.split("-")[1] == "CN"
+    assert int(n2.rsplit("-", 1)[1]) == int(n1.rsplit("-", 1)[1]) + 1
+    assert r2.json()["original_invoice_number"] == sale["invoice_number"]
     assert _stock(client, h, pid) == 100
 
     # nothing left to return
@@ -79,7 +83,7 @@ def test_kit_return_restocks_components(client):
     assert _stock(client, h, comp) == 44
 
     # return 1 kit -> 3 components restocked -> 47
-    r = client.post("/api/returns/", headers=h, json={
+    r = client.post("/api/returns/", headers=h, json={"reason": "اختبار", 
         "sale_id": sale["id"], "items": [{"product_id": kit, "quantity": 1}]})
     assert r.status_code == 200, r.text
     assert _stock(client, h, comp) == 47

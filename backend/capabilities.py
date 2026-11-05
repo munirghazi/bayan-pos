@@ -1,4 +1,6 @@
 """Phase 3: per-tenant capability enforcement (donation / trade / mixed)."""
+import re
+
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -60,7 +62,15 @@ def require_invoice_identity(request: Request, db: Session = Depends(get_db)) ->
                        {"t": tid}).mappings().first()
         if t and (t.get("vat_number") or "").strip():
             eff["vat_number"] = t["vat_number"]
-    missing = [label for field, label in _INVOICE_REQUIRED if not (eff.get(field) or "").strip()]
+    vat_enabled = db.execute(text("SELECT vat_enabled FROM tenants WHERE id = :t"),
+                             {"t": tid}).scalar()
+    required = _INVOICE_REQUIRED if vat_enabled else [r for r in _INVOICE_REQUIRED if r[0] != "vat_number"]
+    missing = [label for field, label in required if not (eff.get(field) or "").strip()]
+    if not missing and vat_enabled:
+        vat = (eff.get("vat_number") or "").strip()
+        if not re.fullmatch(r"3\d{13}3", vat):
+            raise HTTPException(status_code=400,
+                                detail="الرقم الضريبي غير صحيح: يجب أن يكون 15 رقماً يبدأ وينتهي بالرقم 3")
     if missing:
         raise HTTPException(
             status_code=400,
