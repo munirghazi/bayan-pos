@@ -62,6 +62,11 @@ class Tenant(Base):
     vat_number = Column(String(20), nullable=True)
     national_address = Column(String(50), nullable=True)
     license_number = Column(String(50), nullable=True)   # non-profit / donation license
+    entity_type = Column(String(30), nullable=False, default="nonprofit_association",
+                         server_default="nonprofit_association")   # legal form (entities.py)
+    name_en = Column(String(200), nullable=True)
+    unified_number = Column(String(10), nullable=True)     # الرقم الموحد 7xxxxxxxxx
+    freelance_doc_number = Column(String(30), nullable=True)
     business_type = Column(String(20), nullable=False, default="mixed",
                            server_default="mixed")  # donation|trade|mixed
     sales_enabled = Column(Boolean, nullable=False, default=True, server_default=text("true"))
@@ -93,7 +98,16 @@ class TenantSettings(Base):
     street_name = Column(String(150), nullable=True)      # اسم الشارع
     district = Column(String(100), nullable=True)         # الحي
     postal_code = Column(String(10), nullable=True)       # الرمز البريدي (5 digits)
-    additional_number = Column(String(10), nullable=True) # الرقم الإضافي (4 digits)
+    additional_number = Column(String(10), nullable=True) # الرقم الفرعي (4 digits)
+    short_address = Column(String(8), nullable=True)      # العنوان المختصر  AAAA9999
+    street_name_en = Column(String(150), nullable=True)
+    district_en = Column(String(100), nullable=True)
+    city_en = Column(String(100), nullable=True)
+    country_en = Column(String(100), nullable=True)
+    address_proof_number = Column(String(30), nullable=True)
+    address_proof_expiry = Column(Date, nullable=True)
+    show_en_address = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    receipt_thanks = Column(String(200), nullable=True)   # closing line (default by entity group)
     region = Column(String(100), nullable=True)           # المنطقة
     website = Column(String(200), nullable=True)
     logo_url = Column(String(500), nullable=True)

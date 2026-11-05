@@ -3,6 +3,9 @@ import glob
 import shutil
 import uuid
 
+from datetime import date
+import re
+
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -19,6 +22,28 @@ LOGO_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"}
 # ===================== Schemas =====================
 
 class TenantSettingsResponse(BaseModel):
+    # ---- identity (platform-controlled, read-only here)
+    entity_type: str | None = None
+    entity_type_label: str | None = None
+    entity_group: str | None = None
+    primary_registration: str | None = None
+    name_en: str | None = None
+    unified_number: str | None = None
+    cr_number: str | None = None
+    license_number: str | None = None
+    freelance_doc_number: str | None = None
+    vat_enabled: bool = True
+    # ---- national address extras (Release 2a)
+    short_address: str | None = None
+    street_name_en: str | None = None
+    district_en: str | None = None
+    city_en: str | None = None
+    country_en: str | None = None
+    address_proof_number: str | None = None
+    address_proof_expiry: date | None = None
+    show_en_address: bool = False
+    receipt_thanks: str | None = None
+    default_thanks: str | None = None
     seller_name: str | None = None
     vat_number: str | None = None
     national_address: str | None = None
@@ -50,11 +75,24 @@ class TenantSettingsResponse(BaseModel):
         from_attributes = True
 
 
+IDENTITY_FIELDS = {"seller_name", "vat_number", "vat_rate"}   # platform-controlled
+
+
 class TenantSettingsUpdate(BaseModel):
+    # identity fields are accepted only to give a clear 403 (see update_tenant_settings)
     seller_name: str | None = None
     vat_number: str | None = None
-    national_address: str | None = None
     vat_rate: float | None = None
+    national_address: str | None = None
+    short_address: str | None = None
+    street_name_en: str | None = None
+    district_en: str | None = None
+    city_en: str | None = None
+    country_en: str | None = None
+    address_proof_number: str | None = None
+    address_proof_expiry: date | None = None
+    show_en_address: bool | None = None
+    receipt_thanks: str | None = None
     city: str | None = None
     country: str | None = None
     building_number: str | None = None
@@ -99,10 +137,30 @@ def get_tenant_settings(request: Request, db: Session = Depends(get_db),
 def _settings_response(db, row, tid):
     # Fall back to the identity captured at onboarding (tenants table) when the
     # invoice settings haven't been filled in yet, so invoices are never blank.
+    import entities
     t = db.query(Tenant).filter(Tenant.id == tid).first() if tid else None
+    ent = entities.info(getattr(t, "entity_type", None))
     return TenantSettingsResponse(
-        seller_name=row.seller_name or (t.name if t else None),
-        vat_number=row.vat_number or (t.vat_number if t else None),
+        **ent,
+        name_en=getattr(t, "name_en", None),
+        unified_number=getattr(t, "unified_number", None),
+        cr_number=getattr(t, "cr_number", None),
+        license_number=getattr(t, "license_number", None),
+        freelance_doc_number=getattr(t, "freelance_doc_number", None),
+        vat_enabled=bool(getattr(t, "vat_enabled", True)) if t else True,
+        short_address=row.short_address,
+        street_name_en=row.street_name_en,
+        district_en=row.district_en,
+        city_en=row.city_en,
+        country_en=row.country_en,
+        address_proof_number=row.address_proof_number,
+        address_proof_expiry=row.address_proof_expiry,
+        show_en_address=bool(row.show_en_address),
+        receipt_thanks=row.receipt_thanks,
+        default_thanks=entities.THANKS[ent["entity_group"]],
+        # legal name + VAT number: the platform record first (settings = legacy)
+        seller_name=(t.name if t and t.name else row.seller_name),
+        vat_number=((t.vat_number if t else None) or row.vat_number),
         national_address=row.national_address or (t.national_address if t else None),
         vat_rate=row.vat_rate if row.vat_rate is not None else 15.0,
         city=row.city,
@@ -133,9 +191,36 @@ def _settings_response(db, row, tid):
 @router.put("/tenant", response_model=TenantSettingsResponse)
 def update_tenant_settings(request: Request, req: TenantSettingsUpdate, db: Session = Depends(get_db),
                            current_user: User = Depends(require_admin)):
+    import entities
     row = _get_or_create(db)
-    for field, value in req.model_dump(exclude_unset=True).items():
-        setattr(row, field, value)
+    tid = getattr(request.state, "tenant_id", None)
+    data = req.model_dump(exclude_unset=True)
+
+    # Identity is platform-controlled: refuse changes, tolerate the unchanged value.
+    current = _settings_response(db, row, tid)
+    changed = [f for f in IDENTITY_FIELDS & data.keys()
+               if (data[f] or None) != (getattr(current, f) or None)
+               and not (f == "vat_rate" and data[f] is not None and float(data[f]) == float(current.vat_rate))]
+    if changed:
+        raise HTTPException(status_code=403,
+                            detail="الاسم النظامي والرقم الضريبي ونسبة الضريبة تُعدَّل من إدارة المنصة")
+    for f in IDENTITY_FIELDS:
+        data.pop(f, None)
+
+    # National address formats (same rules as the official address proof)
+    def bad(field, pattern, msg):
+        v = data.get(field)
+        if v not in (None, "") and not re.fullmatch(pattern, str(v).strip()):
+            raise HTTPException(status_code=400, detail=msg)
+    if data.get("short_address"):
+        data["short_address"] = data["short_address"].strip().upper().replace(" ", "")
+    bad("short_address", r"[A-Z]{4}\d{4}", "العنوان المختصر: 4 حروف إنجليزية ثم 4 أرقام (مثل JBRA6522)")
+    bad("building_number", r"\d{4}", "رقم المبنى: 4 أرقام")
+    bad("additional_number", r"\d{4}", "الرقم الفرعي: 4 أرقام")
+    bad("postal_code", r"\d{5}", "الرمز البريدي: 5 أرقام")
+
+    for field, value in data.items():
+        setattr(row, field, (value.strip() or None) if isinstance(value, str) else value)
     db.commit()
     db.refresh(row)
     tid = getattr(request.state, "tenant_id", None)

@@ -195,9 +195,8 @@ def _format_donation(db: Session, donation: Donation, seller: dict | None = None
         "voided_at": donation.voided_at,
         "voided_by": donation.voided_by,
         # a receipt shows who received the donation — never a VAT number / QR
-        "seller": {k: seller.get(k) for k in (
-            "name", "building_number", "street_name", "district", "city",
-            "postal_code", "region", "country", "national_address", "cr_number")},
+        "seller": {k: v for k, v in seller.items()
+                   if k not in ("vat_number", "vat_registered", "vat_rate")},
         "user_id": donation.user_id,
         "user_name": donation.user.full_name if donation.user else None,
         "issued_at": donation.issued_at,

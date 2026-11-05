@@ -50,6 +50,26 @@ const Receipt = forwardRef(({ sale, type = 'sale', donation = null, creditNote =
       : (isTax ? 'فاتورة ضريبية مبسطة' : 'فاتورة');
 
   const lines = doc.items || [];
+
+  // Address lines in the order of the national address proof.
+  const join = (arr, sep) => arr.filter(Boolean).join(sep);
+  const addrAr = [
+    join([join([seller.building_number, seller.street_name], ' '), seller.secondary_number || seller.additional_number], ' — '),
+    join([seller.district, join([seller.city, seller.postal_code], ' ')], '، '),
+    seller.country,
+  ].filter(Boolean);
+  const addrEn = [
+    join([join([seller.building_number, seller.street_name_en], ' '), seller.secondary_number || seller.additional_number], ' - '),
+    join([seller.district_en, join([seller.city_en, seller.postal_code], ' ')], ', '),
+    seller.country_en,
+  ].filter(Boolean);
+  // Registration numbers: unified number + the one that fits the organization type.
+  const REG = { cr_number: 'س.ت', license_number: 'رقم الترخيص', freelance_doc_number: 'وثيقة العمل الحر' };
+  const regs = [
+    seller.unified_number && ['الرقم الموحد', seller.unified_number],
+    seller.primary_registration && seller[seller.primary_registration] && [REG[seller.primary_registration], seller[seller.primary_registration]],
+    !seller.primary_registration && seller.cr_number && [REG.cr_number, seller.cr_number],
+  ].filter(Boolean);
   const vatRates = [...new Set(lines.map((l) => Number(l.vat_rate || 0)).filter((r) => r > 0))];
 
   return (
@@ -63,25 +83,29 @@ const Receipt = forwardRef(({ sale, type = 'sale', donation = null, creditNote =
             style={{ maxHeight: '64px', maxWidth: '180px', margin: '0 auto 8px', objectFit: 'contain' }}
           />
         )}
-        <h2 className="text-lg font-bold text-gray-800">{seller.name || '— يرجى ضبط بيانات الجهة في الإعدادات —'}</h2>
+        <h2 className="text-lg font-bold text-gray-800">{seller.name || '— يرجى ضبط بيانات المنشأة —'}</h2>
+        {seller.show_en_address && seller.name_en && <p className="text-gray-600 text-xs" dir="ltr">{seller.name_en}</p>}
         {branding.website && <p className="text-gray-500 text-xs mt-1">{branding.website}</p>}
-        {[seller.building_number, seller.street_name].filter(Boolean).length > 0 && (
-          <p className="text-gray-500 text-xs mt-1">{[seller.building_number, seller.street_name].filter(Boolean).join(' ')}</p>
+        {/* National address — Arabic (and English when enabled) */}
+        {addrAr.map((line, i) => <p key={i} className="text-gray-500 text-xs">{line}</p>)}
+        {seller.short_address && (
+          <p className="text-gray-500 text-xs">العنوان المختصر: <span dir="ltr">{seller.short_address}</span></p>
         )}
-        {[seller.district, seller.city, seller.postal_code].filter(Boolean).length > 0 && (
-          <p className="text-gray-500 text-xs">{[seller.district, seller.city, seller.postal_code].filter(Boolean).join('، ')}</p>
-        )}
-        {[seller.region, seller.country].filter(Boolean).length > 0 && (
-          <p className="text-gray-500 text-xs">{[seller.region, seller.country].filter(Boolean).join('، ')}</p>
-        )}
+        {seller.show_en_address && addrEn.map((line, i) => (
+          <p key={`en${i}`} className="text-gray-400 text-[10px] leading-tight" dir="ltr">{line}</p>
+        ))}
         {!seller.building_number && seller.national_address && (
           <p className="text-gray-500 text-xs">{seller.national_address}</p>
         )}
+        {regs.length > 0 && (
+          <p className="text-gray-500 text-xs mt-1">
+            {regs.map(([label, value], i) => (
+              <span key={label}>{i > 0 && ' · '}{label}: <span dir="ltr">{value}</span></span>
+            ))}
+          </p>
+        )}
         {isTax && seller.vat_number && (
           <p className="text-gray-600 text-xs mt-1">الرقم الضريبي: <span dir="ltr">{seller.vat_number}</span></p>
-        )}
-        {type === 'donation' && seller.cr_number && (
-          <p className="text-gray-500 text-xs mt-1">رقم الترخيص / السجل: {seller.cr_number}</p>
         )}
       </div>
 
@@ -262,7 +286,7 @@ const Receipt = forwardRef(({ sale, type = 'sale', donation = null, creditNote =
 
       {/* Footer */}
       <div className="text-center mt-6 pt-4 border-t-2 border-dashed border-gray-400">
-        <p className="text-xs text-gray-500">جزاكم الله خيراً</p>
+        <p className="text-xs text-gray-500">{seller.thanks || 'جزاكم الله خيراً'}</p>
         {branding.receiptFooter && (
           <p className="text-xs text-gray-500 mt-1 whitespace-pre-line">{branding.receiptFooter}</p>
         )}

@@ -15,11 +15,18 @@ def get_tenant_caps(request: Request, db: Session = Depends(get_db)) -> dict:
         raise HTTPException(status_code=401, detail="غير مصرح")
     row = db.execute(text(
         "SELECT business_type, sales_enabled, donations_enabled, purchasing_enabled, "
-        "vat_enabled, inventory_enabled, verification_status "
+        "vat_enabled, inventory_enabled, verification_status, entity_type "
         "FROM tenants WHERE id = :i"), {"i": tid}).mappings().first()
     if not row:
-        raise HTTPException(status_code=404, detail="الجهة غير موجودة")
-    return dict(row)
+        raise HTTPException(status_code=404, detail="المنشأة غير موجودة")
+    import entities
+    caps = dict(row)
+    ent = entities.info(caps.get("entity_type"))
+    caps.update(entity_type=ent["entity_type"], entity_type_label=ent["entity_type_label"],
+                entity_group=ent["entity_group"])
+    # Donations exist only for non-profit organizations, whatever the flag says.
+    caps["donations_enabled"] = bool(caps["donations_enabled"]) and ent["entity_group"] == entities.NONPROFIT
+    return caps
 
 
 def _require(flag: str, message: str):
@@ -30,9 +37,9 @@ def _require(flag: str, message: str):
     return dep
 
 
-require_sales = _require("sales_enabled", "البيع غير مُفعّل لهذه الجهة")
-require_donations = _require("donations_enabled", "التبرّعات غير مُفعّلة لهذه الجهة")
-require_purchasing = _require("purchasing_enabled", "المشتريات غير مُفعّلة لهذه الجهة")
+require_sales = _require("sales_enabled", "البيع غير مُفعّل لهذه المنشأة")
+require_donations = _require("donations_enabled", "التبرّعات غير مُفعّلة لهذه المنشأة")
+require_purchasing = _require("purchasing_enabled", "المشتريات غير مُفعّلة لهذه المنشأة")
 
 
 # --- Invoice identity requirement (trade/mixed must have complete ZATCA data) ---
@@ -57,11 +64,10 @@ def require_invoice_identity(request: Request, db: Session = Depends(get_db)) ->
         "SELECT vat_number, building_number, street_name, district, city, postal_code "
         "FROM tenant_settings WHERE tenant_id = :t"), {"t": tid}).mappings().first()
     eff = dict(ts) if ts else {}
-    if not (eff.get("vat_number") or "").strip():
-        t = db.execute(text("SELECT vat_number FROM tenants WHERE id = :t"),
-                       {"t": tid}).mappings().first()
-        if t and (t.get("vat_number") or "").strip():
-            eff["vat_number"] = t["vat_number"]
+    # the VAT number is platform-controlled (tenants); settings only as legacy fallback
+    t = db.execute(text("SELECT vat_number FROM tenants WHERE id = :t"), {"t": tid}).mappings().first()
+    if t and (t.get("vat_number") or "").strip():
+        eff["vat_number"] = t["vat_number"]
     vat_enabled = db.execute(text("SELECT vat_enabled FROM tenants WHERE id = :t"),
                              {"t": tid}).scalar()
     required = _INVOICE_REQUIRED if vat_enabled else [r for r in _INVOICE_REQUIRED if r[0] != "vat_number"]
@@ -74,5 +80,5 @@ def require_invoice_identity(request: Request, db: Session = Depends(get_db)) ->
     if missing:
         raise HTTPException(
             status_code=400,
-            detail="لا يمكن إصدار فاتورة قبل استكمال بيانات الجهة والعنوان الوطني في الإعدادات: "
+            detail="لا يمكن إصدار فاتورة قبل استكمال بيانات المنشأة والعنوان الوطني في الإعدادات: "
                    + "، ".join(missing))

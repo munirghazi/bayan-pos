@@ -8,6 +8,12 @@ Run from the backend/ folder with the venv active and .env present:
   python manage.py activate <slug>
   python manage.py deactivate <slug>
   python manage.py delete <slug> --yes      # deletes the tenant AND all its data
+  python manage.py identity <slug>          # show the organization identity
+  python manage.py identity <slug> --type company --name "..." --name-en "..." \
+        --unified 7012345678 --cr 4030123456 --vat 310123456700003 --vat-enabled yes
+      types: nonprofit_association nonprofit_foundation endowment cooperative
+             company sole_establishment online_store freelancer other
+      (identity is platform-controlled: the tenant's admin cannot change it)
 
 Counts are RLS-scoped per tenant (the app role sees one tenant at a time), so
 this reflects exactly what each organization can see.
@@ -97,6 +103,65 @@ def cmd_delete(db, args):
     print(f"Deleted tenant '{args.slug}' and all its data.")
 
 
+def cmd_identity(db, args):
+    import entities
+    t = db.query(Tenant).filter(Tenant.slug == args.slug).first()
+    if not t:
+        print(f"Tenant '{args.slug}' not found.")
+        return 1
+    _pin(db, t.id)
+    st = db.query(TenantSettings).filter(TenantSettings.tenant_id == t.id).first()
+
+    changes = {}
+    for arg, field in (("type", "entity_type"), ("name", "name"), ("name_en", "name_en"),
+                       ("unified", "unified_number"), ("cr", "cr_number"), ("license", "license_number"),
+                       ("freelance", "freelance_doc_number"), ("vat", "vat_number")):
+        v = getattr(args, arg)
+        if v is not None:
+            changes[field] = v.strip() or None
+    if args.vat_enabled is not None:
+        changes["vat_enabled"] = args.vat_enabled == "yes"
+    if args.vat_rate is not None:
+        changes["vat_rate"] = args.vat_rate
+
+    if changes:
+        errs = entities.validate_identity(changes)
+        if errs:
+            print("Not saved:\n  - " + "\n  - ".join(errs))
+            return 1
+        for f, v in changes.items():
+            if f == "vat_rate":
+                if st is not None:
+                    st.vat_rate = v
+            else:
+                setattr(t, f, v)
+        if st is not None and "name" in changes:
+            st.seller_name = changes["name"]          # keep the legacy column in step
+        if st is not None and "vat_number" in changes:
+            st.vat_number = changes["vat_number"]
+        if not entities.is_nonprofit(t.entity_type) and t.donations_enabled:
+            t.donations_enabled = False
+            print("  donations switched OFF (only non-profit organizations can receive donations)")
+        db.commit()
+        print("Saved.")
+
+    info = entities.info(t.entity_type)
+    rows = [
+        ("slug", t.slug), ("name (ar)", t.name), ("name (en)", t.name_en),
+        ("type", f"{info['entity_type']}  ({info['entity_type_label']} / {info['entity_group']})"),
+        ("unified number", t.unified_number), ("CR number", t.cr_number),
+        ("licence number", t.license_number), ("freelance doc", t.freelance_doc_number),
+        ("VAT number", t.vat_number), ("VAT registered", "yes" if t.vat_enabled else "no"),
+        ("VAT rate %", st.vat_rate if st else None),
+        ("donations", "on" if (t.donations_enabled and info["entity_group"] == entities.NONPROFIT) else "off"),
+    ]
+    if info["primary_registration"] and not getattr(t, info["primary_registration"]):
+        rows.append(("! missing", info["primary_registration_label"]))
+    for k, v in rows:
+        print(f"  {k:<16}{'' if v is None else v}")
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description="Bayan POS tenant admin")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -108,6 +173,19 @@ def main():
     c.add_argument("name")
     c.add_argument("--admin-user")
     c.add_argument("--admin-pass")
+
+    i = sub.add_parser("identity", help="Show or set the organization identity (platform-controlled)")
+    i.add_argument("slug")
+    i.add_argument("--type")
+    i.add_argument("--name")
+    i.add_argument("--name-en", dest="name_en")
+    i.add_argument("--unified")
+    i.add_argument("--cr")
+    i.add_argument("--license")
+    i.add_argument("--freelance")
+    i.add_argument("--vat")
+    i.add_argument("--vat-enabled", dest="vat_enabled", choices=["yes", "no"])
+    i.add_argument("--vat-rate", dest="vat_rate", type=float)
 
     for name in ("activate", "deactivate", "delete"):
         p = sub.add_parser(name)
@@ -128,6 +206,8 @@ def main():
             cmd_set_active(db, args, False)
         elif args.command == "delete":
             cmd_delete(db, args)
+        elif args.command == "identity":
+            return cmd_identity(db, args)
     finally:
         db.close()
 

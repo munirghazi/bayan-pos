@@ -1,3 +1,4 @@
+import OrgProfile from '../components/OrgProfile';
 import { useState, useEffect, useRef } from 'react';
 import { authAPI, settingsAPI, locationsAPI, apiError } from '../services/api';
 import { getZATCASettings, saveZATCASettings, syncZATCAFromTenant } from '../utils/zatca';
@@ -227,56 +228,6 @@ export default function Settings() {
     setShowForm(false);
   };
 
-  const handleSaveProfile = async () => {
-    const caps = getCapabilities();
-    const needsInvoice = !!caps.sales_enabled;   // trade / mixed
-    const t = (v) => (v || '').trim();
-    if (needsInvoice) {
-      if (!/^\d{15}$/.test(t(profileForm.vatNumber))) { toast.error('الرقم الضريبي يجب أن يكون 15 رقم'); return; }
-      if (!/^\d{4}$/.test(t(profileForm.buildingNumber))) { toast.error('رقم المبنى يجب أن يكون 4 أرقام'); return; }
-      if (!t(profileForm.streetName)) { toast.error('اسم الشارع مطلوب'); return; }
-      if (!t(profileForm.district)) { toast.error('الحي مطلوب'); return; }
-      if (!t(profileForm.city)) { toast.error('المدينة مطلوبة'); return; }
-      if (!/^\d{5}$/.test(t(profileForm.postalCode))) { toast.error('الرمز البريدي يجب أن يكون 5 أرقام'); return; }
-      if (t(profileForm.additionalNumber) && !/^\d{4}$/.test(t(profileForm.additionalNumber))) { toast.error('الرقم الإضافي يجب أن يكون 4 أرقام'); return; }
-    } else if (profileForm.vatNumber && profileForm.vatNumber.length !== 15) {
-      toast.error('الرقم الضريبي يجب أن يكون 15 رقم'); return;
-    }
-    if (savingProfileRef.current) return;
-    savingProfileRef.current = true;
-    try {
-      await settingsAPI.updateTenant({
-        seller_name: profileForm.sellerName,
-        vat_number: profileForm.vatNumber,
-        vat_rate: Math.round((profileForm.vatRate || 0) * 100),
-        website: profileForm.website,
-        city: profileForm.city,
-        country: profileForm.country,
-        building_number: profileForm.buildingNumber,
-        street_name: profileForm.streetName,
-        district: profileForm.district,
-        postal_code: profileForm.postalCode,
-        additional_number: profileForm.additionalNumber,
-        region: profileForm.region,
-      });
-      // resync the receipt/QR identity cache from the saved values
-      syncZATCAFromTenant({
-        seller_name: profileForm.sellerName, vat_number: profileForm.vatNumber,
-        vat_rate: Math.round((profileForm.vatRate || 0) * 100),
-        national_address: '', city: profileForm.city, country: profileForm.country,
-        building_number: profileForm.buildingNumber, street_name: profileForm.streetName,
-        district: profileForm.district, postal_code: profileForm.postalCode,
-        additional_number: profileForm.additionalNumber, region: profileForm.region,
-        website: profileForm.website,
-      });
-      toast.success('تم حفظ بيانات الجمعية');
-    } catch (err) {
-      toast.error(err.response?.data?.detail || 'خطأ في الحفظ');
-    } finally {
-      savingProfileRef.current = false;
-    }
-  };
-
   const saveBranding = async () => {
     const hex = /^#[0-9a-fA-F]{6}$/;
     if (!hex.test(brandForm.primaryColor) || !hex.test(brandForm.accentColor)) {
@@ -318,7 +269,7 @@ export default function Settings() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-800">الإعدادات</h1>
-          <p className="text-gray-500 mt-1">إدارة بيانات الجمعية والمستخدمين</p>
+          <p className="text-gray-500 mt-1">إدارة بيانات المنشأة والمستخدمين</p>
         </div>
         {activeSection === 'users' && (
           <button
@@ -342,7 +293,7 @@ export default function Settings() {
           }`}
         >
           <HiOutlineOfficeBuilding />
-          بيانات الجمعية
+          بيانات المنشأة
         </button>
         <button
           onClick={() => setActiveSection('pos')}
@@ -369,189 +320,7 @@ export default function Settings() {
       </div>
 
       {/* ===== Company Profile & ZATCA Section ===== */}
-      {activeSection === 'profile' && (
-        <div className="space-y-6">
-          {/* Company Info + VAT in one card */}
-          <div className="bg-white rounded-xl border p-6 space-y-6">
-            <div>
-              <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
-                <HiOutlineOfficeBuilding className="text-bayan-green" />
-                بيانات الجمعية والإعدادات الضريبية
-              </h2>
-              <p className="text-sm text-gray-500 mt-1">
-                هذه البيانات تظهر في الفواتير وتُستخدم لإنشاء رمز QR المتوافق مع هيئة الزكاة والضريبة والجمارك (ZATCA)
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Seller Name */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  اسم الجمعية / البائع *
-                </label>
-                <input
-                  type="text"
-                  value={profileForm.sellerName}
-                  onChange={(e) => setProfileForm({ ...profileForm, sellerName: e.target.value })}
-                  className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none"
-                  placeholder="جمعية بيان بمكة المكرمة"
-                />
-              </div>
-
-              {/* VAT Number */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  الرقم الضريبي (VAT Number) *
-                </label>
-                <input
-                  type="text"
-                  value={profileForm.vatNumber}
-                  onChange={(e) => setProfileForm({ ...profileForm, vatNumber: e.target.value })}
-                  className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none font-mono"
-                  placeholder="300000000000003"
-                  dir="ltr"
-                  maxLength={15}
-                />
-                <p className="text-xs text-gray-400 mt-1">الرقم الضريبي يتكون من 15 رقم ويبدأ وينتهي بـ 3</p>
-              </div>
-
-              {/* VAT Rate */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  نسبة ضريبة القيمة المضافة (%)
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={(profileForm.vatRate * 100).toFixed(0)}
-                  onChange={(e) => setProfileForm({ ...profileForm, vatRate: parseFloat(e.target.value || 0) / 100 })}
-                  className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none"
-                  placeholder="15"
-                  dir="ltr"
-                />
-                <p className="text-xs text-gray-400 mt-1">النسبة الحالية في المملكة العربية السعودية 15%</p>
-              </div>
-
-              {/* Website */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">الموقع الإلكتروني</label>
-                <input
-                  type="text"
-                  value={profileForm.website}
-                  onChange={(e) => setProfileForm({ ...profileForm, website: e.target.value })}
-                  className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none"
-                  placeholder="https://example.org.sa"
-                  dir="ltr"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">المدينة</label>
-                <input
-                  type="text"
-                  value={profileForm.city}
-                  onChange={(e) => setProfileForm({ ...profileForm, city: e.target.value })}
-                  className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none"
-                  placeholder="المدينة"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">الدولة</label>
-                <input
-                  type="text"
-                  value={profileForm.country}
-                  onChange={(e) => setProfileForm({ ...profileForm, country: e.target.value })}
-                  className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none"
-                  placeholder="الدولة"
-                />
-              </div>
-            </div>
-
-            {/* National address (ZATCA) */}
-            <div className="pt-4 mt-2 border-t">
-              <h4 className="text-sm font-bold text-gray-700">العنوان الوطني (حسب هيئة الزكاة والضريبة والجمارك)</h4>
-              <p className="text-xs text-gray-400 mb-4">مطلوب لإصدار الفواتير الضريبية للجهات التجارية</p>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">رقم المبنى (4 أرقام)</label>
-                  <input type="text" dir="ltr" maxLength={4}
-                    value={profileForm.buildingNumber}
-                    onChange={(e) => setProfileForm({ ...profileForm, buildingNumber: e.target.value.replace(/\D/g, '') })}
-                    className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none"
-                    placeholder="1234" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">اسم الشارع</label>
-                  <input type="text"
-                    value={profileForm.streetName}
-                    onChange={(e) => setProfileForm({ ...profileForm, streetName: e.target.value })}
-                    className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none"
-                    placeholder="طريق الملك عبدالعزيز" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">الحي</label>
-                  <input type="text"
-                    value={profileForm.district}
-                    onChange={(e) => setProfileForm({ ...profileForm, district: e.target.value })}
-                    className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none"
-                    placeholder="النسيم" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">الرمز البريدي (5 أرقام)</label>
-                  <input type="text" dir="ltr" maxLength={5}
-                    value={profileForm.postalCode}
-                    onChange={(e) => setProfileForm({ ...profileForm, postalCode: e.target.value.replace(/\D/g, '') })}
-                    className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none"
-                    placeholder="24231" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">الرقم الإضافي (4 أرقام)</label>
-                  <input type="text" dir="ltr" maxLength={4}
-                    value={profileForm.additionalNumber}
-                    onChange={(e) => setProfileForm({ ...profileForm, additionalNumber: e.target.value.replace(/\D/g, '') })}
-                    className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none"
-                    placeholder="9013" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">المنطقة</label>
-                  <input type="text"
-                    value={profileForm.region}
-                    onChange={(e) => setProfileForm({ ...profileForm, region: e.target.value })}
-                    className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none"
-                    placeholder="مكة المكرمة" />
-                </div>
-              </div>
-            </div>
-
-            {/* Save button */}
-            <div className="flex justify-end pt-2 border-t">
-              <button
-                onClick={handleSaveProfile}
-                className="flex items-center gap-2 bg-bayan-green hover:bg-bayan-dark text-white px-8 py-3 rounded-xl transition-all font-bold"
-              >
-                <HiOutlineSave className="text-xl" />
-                حفظ البيانات
-              </button>
-            </div>
-          </div>
-
-          {/* ZATCA Info box */}
-          <div className="bg-blue-50 border border-blue-200 rounded-xl p-5">
-            <h3 className="font-bold text-blue-800 text-sm mb-2 flex items-center gap-2">
-              <HiOutlineDocumentText />
-              معلومات عن الفاتورة الضريبية المبسطة (ZATCA)
-            </h3>
-            <ul className="text-sm text-blue-700 space-y-1 list-disc list-inside">
-              <li>تتوافق مع متطلبات المرحلة الأولى من الفوترة الإلكترونية</li>
-              <li>رمز QR يحتوي على: اسم البائع، الرقم الضريبي، التاريخ، الإجمالي، ومبلغ الضريبة</li>
-              <li>المنتجات المعفاة من الضريبة لا تُحسب عليها ضريبة القيمة المضافة</li>
-              <li>يمكن تعيين إعفاء المنتج من الضريبة من صفحة إدارة المنتجات</li>
-            </ul>
-          </div>
-        </div>
-      )}
+      {activeSection === 'profile' && <OrgProfile />}
 
       {/* ===== POS Settings Section ===== */}
       {activeSection === 'pos' && (
@@ -560,7 +329,7 @@ export default function Settings() {
           <div className="bg-white rounded-xl border p-6 space-y-4">
             <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
               <HiOutlinePhotograph className="text-bayan-green" />
-              شعار الجمعية
+              شعار المنشأة
             </h2>
             <p className="text-sm text-gray-500">يظهر الشعار في صفحة الدخول والقائمة الجانبية والفواتير</p>
 
@@ -568,7 +337,7 @@ export default function Settings() {
               {logoPreview ? (
                 <img
                   src={logoPreview}
-                  alt="شعار الجمعية"
+                  alt="شعار المنشأة"
                   className="w-24 h-24 object-contain rounded-xl border border-gray-200 bg-gray-50 p-1"
                 />
               ) : (

@@ -133,34 +133,60 @@ def format_number(code: str, doc_type: str, seq: int) -> str:
 # ---------------------------------------------------------------- seller
 
 def seller_snapshot(db) -> dict:
-    """Seller identity + VAT status at issue time (settings, onboarding fallback)."""
+    """Seller identity + address + VAT status at issue time.
+
+    Identity (legal names, type, registration numbers, VAT number) comes from the
+    platform-controlled `tenants` record; the address and receipt preferences
+    from the tenant's settings. Stored on every document, so later edits never
+    change an issued invoice.
+    """
+    import entities
     from database import TenantSettings, Tenant
     st = db.query(TenantSettings).first()
     tid = st.tenant_id if st else None
     t = db.query(Tenant).filter(Tenant.id == tid).first() if tid else None
 
-    def pick(field):
+    def pick(field):            # string settings only
         v = getattr(st, field, None) if st else None
         return (v or "").strip() or None
 
-    vat_number = pick("vat_number") or ((t.vat_number or "").strip() if t and t.vat_number else None)
+    def tget(field):
+        v = getattr(t, field, None) if t else None
+        return (v or "").strip() or None
+
+    vat_number = tget("vat_number") or pick("vat_number")      # settings only as a legacy fallback
     vat_enabled = bool(getattr(t, "vat_enabled", True)) if t else True
     rate = d(st.vat_rate if st and st.vat_rate is not None else 15)
+    ent = entities.info(getattr(t, "entity_type", None))
     return {
-        "name": pick("seller_name") or (t.name if t else None),
+        "name": tget("name") or pick("seller_name"),
+        "name_en": tget("name_en"),
+        **ent,
+        "unified_number": tget("unified_number"),
+        "cr_number": tget("cr_number"),
+        "license_number": tget("license_number"),
+        "freelance_doc_number": tget("freelance_doc_number"),
         "vat_number": vat_number,
         "vat_registered": bool(vat_enabled and vat_number),
         "vat_rate": float(rate) if vat_enabled else 0.0,
+        # national address — same order as the official address proof
+        "short_address": pick("short_address"),
         "building_number": pick("building_number"),
         "street_name": pick("street_name"),
-        "district": pick("district"),
-        "city": pick("city"),
-        "postal_code": pick("postal_code"),
+        "street_name_en": pick("street_name_en"),
+        "secondary_number": pick("additional_number"),
         "additional_number": pick("additional_number"),
-        "region": pick("region"),
+        "district": pick("district"),
+        "district_en": pick("district_en"),
+        "postal_code": pick("postal_code"),
+        "city": pick("city"),
+        "city_en": pick("city_en"),
         "country": pick("country"),
+        "country_en": pick("country_en"),
+        "region": pick("region"),
         "national_address": pick("national_address") or (t.national_address if t else None),
-        "cr_number": (t.cr_number if t else None),
+        "show_en_address": bool(getattr(st, "show_en_address", False)) if st else False,
+        "thanks": pick("receipt_thanks") or entities.THANKS[ent["entity_group"]],
     }
 
 
