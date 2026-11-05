@@ -1,18 +1,25 @@
 /**
- * طباعة الإيصال بطريقة موثوقة على طابعة حرارية 80مم (Epson TM-m30II)
- * يأخذ محتوى HTML من ref ويطبعه في نافذة منفصلة مع انتظار التحميل.
- * العرض مضبوط على 72مم (منطقة الطباعة الفعلية لورق 80مم) مع قطع تلقائي سليم.
+ * طباعة الإيصال على طابعة حرارية 80مم (Epson TM-m30II)
+ *
+ * تتم الطباعة عبر إطار (iframe) مخفي داخل نفس الصفحة — وليس نافذة منبثقة —
+ * فتظهر نافذة الطباعة في Chrome كاملة فوق الشاشة بدل أن تُحصر داخل نافذة صغيرة.
+ * العرض مضبوط على 72مم (منطقة الطباعة الفعلية لورق 80مم).
  */
 export function printReceipt(receiptRef) {
   if (!receiptRef?.current) return;
 
   const content = receiptRef.current.innerHTML;
 
-  const printWindow = window.open('', '_blank', 'width=360,height=640');
-  if (!printWindow) {
-    alert('الرجاء السماح بالنوافذ المنبثقة لطباعة الإيصال');
-    return;
-  }
+  const old = document.getElementById('receipt-print-frame');
+  if (old) old.remove();
+  const frame = document.createElement('iframe');
+  frame.id = 'receipt-print-frame';
+  frame.setAttribute('aria-hidden', 'true');
+  Object.assign(frame.style, {
+    position: 'fixed', right: '0', bottom: '0', width: '0', height: '0', border: '0', visibility: 'hidden',
+  });
+  document.body.appendChild(frame);
+  const printWindow = frame.contentWindow;
 
   printWindow.document.write(`
     <!DOCTYPE html>
@@ -128,15 +135,22 @@ export function printReceipt(receiptRef) {
 
   printWindow.document.close();
 
-  // انتظر حتى تحميل الخطوط والمحتوى ثم اطبع
-  printWindow.onload = () => {
+  // انتظر تحميل الخطوط والصور ثم اطبع؛ أزل الإطار بعد الطباعة أو الإلغاء
+  let printed = false;
+  const go = () => {
+    if (printed) return;
+    printed = true;
     setTimeout(() => {
       printWindow.focus();
       printWindow.print();
-      // أغلق النافذة بعد الطباعة أو الإلغاء
-      printWindow.onafterprint = () => {
-        printWindow.close();
-      };
-    }, 500);
+      setTimeout(() => frame.remove(), 1000);
+    }, 300);
   };
+  const fonts = printWindow.document.fonts;
+  if (fonts && fonts.ready) {
+    Promise.race([fonts.ready, new Promise((r) => setTimeout(r, 1500))]).then(go);
+  } else {
+    frame.onload = go;
+    setTimeout(go, 1500);
+  }
 }

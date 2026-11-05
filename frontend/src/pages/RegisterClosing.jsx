@@ -34,7 +34,7 @@ export default function RegisterClosing() {
   };
 
   const expectedCash = zreport
-    ? (parseFloat(openingFloat || 0) + (zreport.by_method?.cash || 0))
+    ? (parseFloat(openingFloat || 0) + (zreport.by_method?.cash || 0) - (zreport.cash_refunds || 0))
     : 0;
   const variance = countedCash !== '' ? (parseFloat(countedCash || 0) - expectedCash) : null;
 
@@ -89,7 +89,7 @@ export default function RegisterClosing() {
             <Stat label="نقدي" value={money(zreport.by_method?.cash)} sar />
             <Stat label="شبكة" value={money(zreport.by_method?.card)} sar />
             <Stat label="تحويل" value={money(zreport.by_method?.transfer)} sar />
-            <Stat label="أخرى" value={money(zreport.by_method?.other)} sar />
+            <Stat label="مرتجعات نقدية" value={money(-(zreport.cash_refunds || 0))} sar />
             <Stat label="إجمالي المبيعات" value={money(zreport.total_sales)} sar />
             <Stat label="النقد المتوقع" value={money(zreport.expected_cash)} sar highlight />
           </div>

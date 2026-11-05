@@ -15,6 +15,9 @@ backend/bayan_pos.db
 
 # Uploads (product images - user data)
 backend/uploads/
+# Private files (transfer proofs) - never commit
+backend/storage/
+storage/
 uploads/
 
 # IDE

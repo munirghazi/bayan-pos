@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     smtp_from_name: str = "Bayan POS"
     smtp_tls: bool = True
 
+    # --- Private files (bank-transfer proofs). NOT served as static files. ---
+    private_storage_dir: str = "storage"
+    proof_max_bytes: int = 5 * 1024 * 1024
+
     @property
     def cors_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

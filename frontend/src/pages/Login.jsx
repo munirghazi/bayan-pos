@@ -60,7 +60,7 @@ export default function Login() {
           {logoUrl ? (
             <img
               src={logoUrl}
-              alt="شعار الجمعية"
+              alt="الشعار"
               className="h-20 mx-auto mb-4 object-contain"
             />
           ) : (

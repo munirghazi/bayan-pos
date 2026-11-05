@@ -34,6 +34,7 @@ class DonationCreate(BaseModel):
     note: str | None = None
     payment_method: str
     card_ref: str | None = None
+    proof_id: int | None = None          # bank-transfer proof (required for transfer)
     register_id: int | None = None
 
 
@@ -51,6 +52,7 @@ class DonationResponse(BaseModel):
     note: str | None
     payment_method: str
     card_ref: str | None = None
+    proof_id: int | None = None
     status: str
     void_reason: str | None = None
     voided_at: datetime | None = None
@@ -72,14 +74,34 @@ def create_donation(request: DonationCreate, db: Session = Depends(get_db),
     prior = idempotency.replay(db, idempotency_key, "donations")
     if prior is not None:
         return JSONResponse(content=prior)
+    donation = issue_donation(db, request, current_user)
+    _resp = _format_donation(db, donation)
+    idempotency.store(db, idempotency_key, "donations", _resp)
+    return _resp
+
+
+def validate_donation(db, request: DonationCreate, user, draft: bool = False):
+    """Donation rules. Returns (location_id, register_id)."""
+    import payments as pay
     if request.amount <= 0:
         raise HTTPException(status_code=400, detail="مبلغ التبرع يجب أن يكون أكبر من صفر")
     if request.payment_method == "cash":
         raise HTTPException(status_code=400,
                             detail="لا تُقبل التبرعات نقداً — الدفع بالشبكة أو التحويل البنكي فقط")
     _check_payment(db, request.payment_method, request.card_ref, inv.DONATION_PAYMENT_METHODS)
+    if request.payment_method == "transfer":
+        _, require_proof = pay.tenant_payment_settings(db)
+        if request.proof_id:
+            pay.check_proof(db, request.proof_id)
+        elif require_proof and not draft:
+            raise HTTPException(status_code=400,
+                                detail="أرفق إثبات التحويل البنكي أو احفظ التبرع كمسودة")
+    return inv.resolve_location(db, request.register_id, user)
 
-    location_id, register_id = inv.resolve_location(db, request.register_id, current_user)
+
+def issue_donation(db, request: DonationCreate, user, before_commit=None) -> Donation:
+    import payments as pay
+    location_id, register_id = validate_donation(db, request, user)
     alloc = inv.allocate(db, location_id, inv.DOC_DONATION)
     donation = Donation(
         location_id=location_id,
@@ -92,17 +114,19 @@ def create_donation(request: DonationCreate, db: Session = Depends(get_db),
         note=(request.note or "").strip() or None,
         payment_method=request.payment_method,
         card_ref=(request.card_ref or "").strip() or None,
+        proof_id=request.proof_id if request.payment_method == "transfer" else None,
         status="issued",
-        user_id=current_user.id,
+        user_id=user.id,
     )
     db.add(donation)
+    if donation.proof_id:
+        pay.mark_proof_used(db, donation.proof_id, alloc.number)
     inv.commit_allocation(db, alloc, None)
+    if before_commit:
+        before_commit(donation)
     db.commit()
     db.refresh(donation)
-
-    _resp = _format_donation(db, donation)
-    idempotency.store(db, idempotency_key, "donations", _resp)
-    return _resp
+    return donation
 
 
 @router.get("/", response_model=list[DonationResponse])
@@ -165,6 +189,7 @@ def _format_donation(db: Session, donation: Donation, seller: dict | None = None
         "note": donation.note,
         "payment_method": donation.payment_method,
         "card_ref": donation.card_ref,
+        "proof_id": donation.proof_id,
         "status": donation.status,
         "void_reason": donation.void_reason,
         "voided_at": donation.voided_at,

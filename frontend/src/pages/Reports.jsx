@@ -2,8 +2,9 @@ import { useState, useEffect, useRef } from 'react';
 import { reportsAPI, salesAPI, donationsAPI, apiError } from '../services/api';
 import { getCapabilities } from '../utils/posSettings';
 import { fmtDateTime } from '../utils/datetime';
+import { openProof } from '../utils/proofs';
 import { SarIcon, SAR_TEXT } from '../components/SarIcon';
-import Receipt from '../components/Receipt';
+import DocumentModal from '../components/DocumentModal';
 import { printReceipt } from '../utils/printReceipt';
 import { generatePDFBlob, downloadPDF } from '../utils/generatePDF';
 import toast from 'react-hot-toast';
@@ -19,7 +20,7 @@ import {
   HiOutlineDownload,
 } from 'react-icons/hi';
 
-const paymentMethodAr = { cash: 'نقدي', card: 'شبكة', transfer: 'تحويل' };
+const paymentMethodAr = { cash: 'نقدي', card: 'شبكة', transfer: 'تحويل', mixed: 'متعدد' };
 const riyadhToday = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Riyadh' });
 
 export default function Reports() {
@@ -148,87 +149,6 @@ export default function Reports() {
       setShowReceipt(true);
     } catch (err) {
       toast.error(apiError(err, 'تعذّر تحميل الإيصال'));
-    }
-  };
-
-  const handlePrint = () => {
-    printReceipt(receiptRef);
-  };
-
-  const handleShare = async (method) => {
-    if (!receiptRef.current) {
-      toast.error('لا يوجد إيصال للمشاركة.');
-      return;
-    }
-
-    const filename = selectedSale
-      ? `فاتورة_${selectedSale.invoice_number}.pdf`
-      : `إيصال_تبرع_${selectedDonation.receipt_number}.pdf`;
-    const pdfBlob = await generatePDFBlob(receiptRef.current, filename);
-
-    if (!pdfBlob) {
-      toast.error('فشل في إنشاء ملف PDF.');
-      return;
-    }
-
-    if (method === 'download') {
-      const url = URL.createObjectURL(pdfBlob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-      toast.success('تم تحميل الفاتورة بنجاح');
-      return;
-    }
-
-    const file = new File([pdfBlob], filename, { type: 'application/pdf' });
-
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          files: [file],
-          title: filename,
-          text: 'إيصال من جمعية بيان بمكة المكرمة',
-        });
-        toast.success('تمت المشاركة بنجاح!');
-      } catch (error) {
-        console.error('Error sharing:', error);
-        // Fallback
-        fallbackShare(method, pdfBlob, filename);
-      }
-    } else {
-      fallbackShare(method, pdfBlob, filename);
-    }
-  };
-
-  const fallbackShare = (method, pdfBlob, filename) => {
-    if (method === 'email') {
-      // Download the PDF first, then open mailto
-      const url = URL.createObjectURL(pdfBlob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-      const mailtoLink = `mailto:?subject=${encodeURIComponent(filename)}&body=${encodeURIComponent('مرفق إيصالك من جمعية بيان بمكة المكرمة. تم تحميل الملف، يرجى إرفاقه.')}`;
-      window.open(mailtoLink, '_blank');
-    } else if (method === 'whatsapp') {
-      toast('الرجاء تحميل الملف ومشاركته يدوياً عبر واتساب.', { icon: 'ℹ️' });
-      const url = URL.createObjectURL(pdfBlob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-    } else {
-      toast.error('المشاركة غير مدعومة في متصفحك.');
     }
   };
 
@@ -425,6 +345,19 @@ export default function Reports() {
                                 ))}
                               </tbody>
                             </table>
+                            <div className="flex flex-wrap gap-4 mt-2 text-xs text-gray-600">
+                              {(sale.payments || []).map((p, i) => (
+                                <span key={i}>
+                                  {paymentMethodAr[p.method]}: {p.amount.toFixed(2)}
+                                  {p.card_ref && <span dir="ltr"> ({p.card_ref})</span>}
+                                  {p.proof_id && (
+                                    <button onClick={(e) => { e.stopPropagation(); openProof(p.proof_id); }}
+                                      className="mr-1 text-bayan-green hover:underline">📎 الإثبات</button>
+                                  )}
+                                </span>
+                              ))}
+                              {sale.change_given > 0 && <span>الباقي: {sale.change_given.toFixed(2)}</span>}
+                            </div>
                           </div>
                         </td>
                       </tr>
@@ -517,67 +450,14 @@ export default function Reports() {
         </>
       )}
 
-      {/* ========== Reprint Receipt Modal ========== */}
+      {/* ========== Reprint: same document window as everywhere ========== */}
       {showReceipt && (selectedSale || selectedDonation) && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-auto">
-            {/* Receipt Preview */}
-            <div ref={receiptRef}>
-              <Receipt
-                sale={selectedSale}
-                type={selectedDonation ? 'donation' : 'sale'}
-                donation={selectedDonation}
-              />
-            </div>
-
-            {/* Action Buttons */}
-            <div className="p-4 border-t space-y-3">
-              {/* Row 1: Print + Download PDF */}
-              <div className="flex gap-3">
-                <button
-                  onClick={handlePrint}
-                  className="flex-1 flex items-center justify-center gap-2 bg-bayan-green hover:bg-bayan-dark text-white font-bold py-3 rounded-xl transition-all"
-                >
-                  <HiOutlinePrinter />
-                  طباعة
-                </button>
-                <button
-                  onClick={() => handleShare('download')}
-                  className="flex-1 flex items-center justify-center gap-2 bg-gray-700 hover:bg-gray-800 text-white font-bold py-3 rounded-xl transition-all"
-                >
-                  <HiOutlineDownload />
-                  تحميل PDF
-                </button>
-              </div>
-
-              {/* Row 2: Email + WhatsApp */}
-              <div className="flex gap-3">
-                <button
-                  onClick={() => handleShare('email')}
-                  className="flex-1 flex items-center justify-center gap-2 bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 rounded-xl transition-all"
-                >
-                  <HiOutlineMail />
-                  إرسال بريد
-                </button>
-                <button
-                  onClick={() => handleShare('whatsapp')}
-                  className="flex-1 flex items-center justify-center gap-2 bg-green-500 hover:bg-green-600 text-white font-bold py-3 rounded-xl transition-all"
-                >
-                  <HiOutlineChatAlt2 />
-                  واتساب
-                </button>
-              </div>
-
-              {/* Row 3: Close */}
-              <button
-                onClick={closeReceipt}
-                className="w-full py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl transition-all font-medium"
-              >
-                إغلاق
-              </button>
-            </div>
-          </div>
-        </div>
+        <DocumentModal
+          type={selectedDonation ? 'donation' : 'sale'}
+          doc={selectedDonation || selectedSale}
+          phone={selectedSale?.customer_phone || ''}
+          onClose={closeReceipt}
+        />
       )}
     </div>
   );

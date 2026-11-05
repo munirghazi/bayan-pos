@@ -42,6 +42,7 @@ class TenantSettingsResponse(BaseModel):
     receipt_footer: str | None = None
     show_powered_by: bool = True
     payment_methods: str = "cash,card,transfer"
+    require_transfer_proof: bool = True
     data_retention_months: int | None = None
     inventory_mode: str = "per_branch"
 
@@ -64,6 +65,7 @@ class TenantSettingsUpdate(BaseModel):
     region: str | None = None
     website: str | None = None
     payment_methods: str | None = None
+    require_transfer_proof: bool | None = None
     favicon_url: str | None = None
     primary_color: str | None = None
     accent_color: str | None = None
@@ -120,6 +122,7 @@ def _settings_response(db, row, tid):
         font_family=row.font_family,
         ui_radius=row.ui_radius,
         payment_methods=row.payment_methods or "cash,card,transfer",
+        require_transfer_proof=bool(getattr(row, "require_transfer_proof", True)),
         data_retention_months=row.data_retention_months,
         inventory_mode=row.inventory_mode or "per_branch",
         receipt_footer=row.receipt_footer,

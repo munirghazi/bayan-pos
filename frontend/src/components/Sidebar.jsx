@@ -101,12 +101,12 @@ export default function Sidebar() {
       </button>
 
       {/* Logo / Header */}
-      <div className={`${collapsed ? 'px-2 pb-3' : 'px-6 pb-6'} border-b border-bayan-green/30 text-center`}>
+      <div className={`${collapsed ? 'px-2 pb-3' : 'px-6 pb-6 [@media(max-height:820px)]:pb-2'} border-b border-bayan-green/30 text-center`}>
         {tenantLogo ? (
           <img
             src={tenantLogo}
-            alt="شعار الجمعية"
-            className={`${collapsed ? 'h-10 w-10' : 'h-14'} mx-auto mb-2 object-contain bg-white rounded-lg p-1`}
+            alt="الشعار"
+            className={`${collapsed ? 'h-10 w-10' : 'h-14 [@media(max-height:820px)]:h-9'} mx-auto mb-2 object-contain bg-white rounded-lg p-1`}
           />
         ) : (
           <div className={`mx-auto mb-2 ${collapsed ? 'w-10 h-10' : 'w-14 h-14'} bg-white rounded-xl flex items-center justify-center`}>
@@ -127,7 +127,7 @@ export default function Sidebar() {
       </div>
 
       {/* Navigation */}
-      <nav className={`flex-1 ${collapsed ? 'p-2' : 'p-4'} space-y-1 overflow-auto`}>
+      <nav className={`flex-1 ${collapsed ? 'p-2' : 'p-4 [@media(max-height:820px)]:py-2'} space-y-1 [@media(max-height:820px)]:space-y-0.5 overflow-y-auto sidebar-scroll`}>
         {filteredMenu.map((item) => (
           <NavLink
             key={item.path}
@@ -135,7 +135,7 @@ export default function Sidebar() {
             end={item.path === '/'}
             title={item.label}
             className={({ isActive }) =>
-              `flex items-center ${collapsed ? 'justify-center px-0' : 'gap-3 px-4'} py-3 rounded-lg transition-all duration-200 ${
+              `flex items-center ${collapsed ? 'justify-center px-0' : 'gap-3 px-4'} py-3 [@media(max-height:820px)]:py-1.5 rounded-lg transition-all duration-200 ${
                 isActive
                   ? 'bg-bayan-green text-white shadow-lg'
                   : 'text-indigo-200 hover:bg-bayan-green/50 hover:text-white'
@@ -148,37 +148,37 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      {/* User info + Logout */}
-      <div className={`${collapsed ? 'p-2' : 'p-4'} border-t border-bayan-green/30`}>
-        {!collapsed && (
-          <div className="flex items-center gap-3 px-4 py-2 mb-2">
-            <div className="w-8 h-8 bg-bayan-green rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0">
-              {user.full_name?.charAt(0) || '؟'}
-            </div>
-            <div>
-              <p className="text-white text-sm font-medium">{user.full_name || 'مستخدم'}</p>
-              <p className="text-indigo-400 text-xs">
-                {user.role === 'admin' ? 'مدير' : 'كاشير'}
-              </p>
-            </div>
-          </div>
-        )}
-        <NavLink
-          to="/change-password"
-          title="تغيير كلمة المرور"
-          className={`flex items-center ${collapsed ? 'justify-center px-0' : 'gap-3 px-4'} py-3 rounded-lg text-indigo-200 hover:bg-bayan-green/50 hover:text-white transition-all w-full`}
-        >
-          <HiOutlineKey className="text-xl flex-shrink-0" />
-          {!collapsed && <span className="font-medium">تغيير كلمة المرور</span>}
-        </NavLink>
-        <button
-          onClick={handleLogout}
-          title="تسجيل الخروج"
-          className={`flex items-center ${collapsed ? 'justify-center px-0' : 'gap-3 px-4'} py-3 rounded-lg text-red-300 hover:bg-red-900/30 hover:text-red-200 transition-all w-full`}
-        >
-          <HiOutlineLogout className="text-xl flex-shrink-0" />
-          {!collapsed && <span className="font-medium">تسجيل الخروج</span>}
-        </button>
+      {/* User info + password + logout — one compact row so the whole menu fits 1366×768 */}
+      <div className={`${collapsed ? 'p-2 space-y-1' : 'p-3'} border-t border-bayan-green/30`}>
+        <div className={`flex items-center ${collapsed ? 'flex-col gap-1' : 'gap-2'}`}>
+          {!collapsed && (
+            <>
+              <div className="w-8 h-8 bg-bayan-green rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0">
+                {user.full_name?.charAt(0) || '؟'}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-white text-sm font-medium truncate">{user.full_name || 'مستخدم'}</p>
+                <p className="text-indigo-400 text-xs">{user.role === 'admin' ? 'مدير' : 'كاشير'}</p>
+              </div>
+            </>
+          )}
+          <NavLink
+            to="/change-password"
+            title="تغيير كلمة المرور"
+            aria-label="تغيير كلمة المرور"
+            className="p-2 rounded-lg text-indigo-200 hover:bg-bayan-green/50 hover:text-white transition-all"
+          >
+            <HiOutlineKey className="text-xl" />
+          </NavLink>
+          <button
+            onClick={handleLogout}
+            title="تسجيل الخروج"
+            aria-label="تسجيل الخروج"
+            className="p-2 rounded-lg text-red-300 hover:bg-red-900/30 hover:text-red-200 transition-all"
+          >
+            <HiOutlineLogout className="text-xl" />
+          </button>
+        </div>
       </div>
     </aside>
   );

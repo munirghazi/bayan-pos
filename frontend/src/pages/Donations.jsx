@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
-import { donationsAPI, apiError } from '../services/api';
+import { donationsAPI, draftsAPI, settingsAPI, apiError } from '../services/api';
+import { uploadProof, openProof } from '../utils/proofs';
 import { getPOSSettings } from '../utils/posSettings';
 import { fmtDateTime } from '../utils/datetime';
-import Receipt from '../components/Receipt';
+import DocumentModal from '../components/DocumentModal';
 import { SarIcon } from '../components/SarIcon';
 import { printReceipt } from '../utils/printReceipt';
 import { downloadPDF, shareViaWhatsApp, shareViaEmail } from '../utils/generatePDF';
@@ -51,7 +52,13 @@ export default function Donations() {
     card_ref: '',
   });
 
+  const [proof, setProof] = useState(null);
+  const [requireProof, setRequireProof] = useState(true);
+  const proofRef = useRef(null);
+  const missingProof = form.payment_method === 'transfer' && requireProof && !proof;
+
   useEffect(() => {
+    settingsAPI.getTenant().then(({ data }) => setRequireProof(data.require_transfer_proof !== false)).catch(() => {});
     loadDonations();
   }, []);
 
@@ -66,8 +73,8 @@ export default function Donations() {
     }
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleSubmit = async (e, asDraft = false) => {
+    e?.preventDefault?.();
     const amount = parseFloat(form.amount);
     if (!amount || amount <= 0) {
       toast.error('الرجاء إدخال مبلغ صحيح');
@@ -82,24 +89,39 @@ export default function Donations() {
       toast.error('الرجاء إدخال رمز العملية');
       return;
     }
+    if (missingProof && !asDraft) {
+      toast.error('أرفق إثبات التحويل أو احفظ التبرع كمسودة');
+      return;
+    }
     const reg = localStorage.getItem('pos_register_id');
+    const body = {
+      donor_name: form.donor_name || null,
+      amount,
+      note: form.note || null,
+      payment_method: form.payment_method,
+      card_ref: form.payment_method === 'card' ? form.card_ref.trim() : null,
+      proof_id: form.payment_method === 'transfer' && proof ? proof.id : null,
+      register_id: reg ? parseInt(reg) : null,
+    };
 
     try {
-      const res = await donationsAPI.create({
-        donor_name: form.donor_name || null,
-        amount,
-        note: form.note || null,
-        payment_method: form.payment_method,
-        card_ref: form.payment_method === 'card' ? form.card_ref.trim() : null,
-        register_id: reg ? parseInt(reg) : null,
-      });
+      if (asDraft) {
+        await draftsAPI.createDonation(body);
+        setShowForm(false);
+        setForm({ donor_name: '', amount: '', note: '', payment_method: methods[0]?.key || 'card', card_ref: '' });
+        setProof(null);
+        toast.success('حُفظ كمسودة — أرفق الإثبات من «المسودات» في نقطة البيع لإصدار الإيصال');
+        return;
+      }
+      const res = await donationsAPI.create(body);
 
       setSelectedDonation(res.data);
       setShowForm(false);
       setShowReceipt(true);
       setForm({ donor_name: '', amount: '', note: '', payment_method: methods[0]?.key || 'card', card_ref: '' });
+      setProof(null);
       loadDonations();
-      toast.success('تم تسجيل التبرع - جزاكم الله خيراً');
+      toast.success(`تم إصدار الإيصال ${res.data.receipt_number}`);
     } catch (err) {
       toast.error(apiError(err, 'خطأ في تسجيل التبرع'));
     }
@@ -116,49 +138,6 @@ export default function Donations() {
       loadDonations();
     } catch (err) {
       toast.error(apiError(err, 'خطأ في إلغاء الإيصال'));
-    }
-  };
-
-  const handlePrint = () => {
-    printReceipt(receiptRef);
-  };
-
-  const getFilename = () => selectedDonation ? `إيصال_تبرع_${selectedDonation.receipt_number}` : 'إيصال_تبرع';
-
-  const handleDownloadPDF = async () => {
-    if (!receiptRef.current) return;
-    try {
-      toast.loading('جاري إنشاء PDF...');
-      await downloadPDF(receiptRef.current, getFilename());
-      toast.dismiss();
-      toast.success('تم تحميل PDF');
-    } catch (err) {
-      toast.dismiss();
-      toast.error('خطأ في إنشاء PDF');
-    }
-  };
-
-  const handleShareWhatsApp = async () => {
-    if (!receiptRef.current) return;
-    try {
-      toast.loading('جاري إنشاء PDF...');
-      await shareViaWhatsApp(receiptRef.current, getFilename());
-      toast.dismiss();
-    } catch (err) {
-      toast.dismiss();
-      toast.error('خطأ في المشاركة');
-    }
-  };
-
-  const handleShareEmail = async () => {
-    if (!receiptRef.current) return;
-    try {
-      toast.loading('جاري إنشاء PDF...');
-      await shareViaEmail(receiptRef.current, getFilename());
-      toast.dismiss();
-    } catch (err) {
-      toast.dismiss();
-      toast.error('خطأ في المشاركة');
     }
   };
 
@@ -242,6 +221,9 @@ export default function Donations() {
                     >
                       <HiOutlinePrinter />
                     </button>
+                    {donation.proof_id && (
+                      <button onClick={() => openProof(donation.proof_id)} className="p-2 text-amber-600 hover:bg-amber-50 rounded-lg" title="إثبات التحويل">📎</button>
+                    )}
                     {isAdmin && donation.status !== 'void' && (
                       <button
                         onClick={() => handleVoid(donation)}
@@ -341,10 +323,35 @@ export default function Donations() {
                 />
               )}
 
+              {form.payment_method === 'transfer' && (
+                <div className="flex items-center gap-2">
+                  {proof ? (
+                    <>
+                      <button type="button" onClick={() => openProof(proof.id)} className="text-sm text-green-700 hover:underline">✓ {proof.name}</button>
+                      <button type="button" onClick={() => setProof(null)} className="text-xs text-gray-400 hover:text-red-500 mr-auto">تغيير</button>
+                    </>
+                  ) : (
+                    <button type="button" onClick={() => proofRef.current?.click()}
+                      className="flex-1 px-3 py-2 rounded-lg border-2 border-dashed border-amber-400 text-amber-700 hover:bg-amber-50 text-sm">
+                      📎 إرفاق إثبات التحويل {requireProof ? '*' : '(اختياري)'}
+                    </button>
+                  )}
+                  <input ref={proofRef} type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="hidden"
+                    onChange={async (e) => { const f = e.target.files?.[0]; e.target.value = ''; const p = await uploadProof(f); if (p) setProof({ id: p.id, name: p.original_name || 'إثبات' }); }} />
+                </div>
+              )}
+
               <div className="flex gap-3 pt-2">
+                {missingProof && (
+                  <button type="button" onClick={(e) => handleSubmit(e, true)}
+                    className="px-4 py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-medium">
+                    حفظ كمسودة
+                  </button>
+                )}
                 <button
                   type="submit"
-                  className="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 rounded-xl transition-all"
+                  disabled={missingProof}
+                  className="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 rounded-xl transition-all disabled:opacity-40"
                 >
                   تسجيل التبرع
                 </button>
@@ -363,55 +370,7 @@ export default function Donations() {
 
       {/* Receipt Modal */}
       {showReceipt && selectedDonation && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-auto">
-            <div ref={receiptRef}>
-              <Receipt type="donation" donation={selectedDonation} />
-            </div>
-            <div className="p-4 border-t space-y-3">
-              {/* Primary actions */}
-              <div className="flex gap-3">
-                <button
-                  onClick={handlePrint}
-                  className="flex-1 flex items-center justify-center gap-2 bg-bayan-green hover:bg-bayan-dark text-white font-bold py-3 rounded-xl transition-all"
-                >
-                  <HiOutlinePrinter />
-                  طباعة
-                </button>
-                <button
-                  onClick={handleDownloadPDF}
-                  className="flex-1 flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-all"
-                >
-                  <HiOutlineDocumentDownload />
-                  تحميل PDF
-                </button>
-              </div>
-              {/* Share actions */}
-              <div className="flex gap-3">
-                <button
-                  onClick={handleShareWhatsApp}
-                  className="flex-1 flex items-center justify-center gap-2 bg-green-500 hover:bg-green-600 text-white font-medium py-2.5 rounded-xl transition-all"
-                >
-                  <WhatsAppIcon />
-                  واتساب
-                </button>
-                <button
-                  onClick={handleShareEmail}
-                  className="flex-1 flex items-center justify-center gap-2 bg-orange-500 hover:bg-orange-600 text-white font-medium py-2.5 rounded-xl transition-all"
-                >
-                  <HiOutlineMail className="text-xl" />
-                  إيميل
-                </button>
-                <button
-                  onClick={() => { setShowReceipt(false); setSelectedDonation(null); }}
-                  className="px-6 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl transition-all"
-                >
-                  إغلاق
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <DocumentModal type="donation" doc={selectedDonation} onClose={() => setShowReceipt(false)} />
       )}
     </div>
   );

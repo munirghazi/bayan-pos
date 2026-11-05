@@ -26,6 +26,7 @@ class ReturnCreate(BaseModel):
     items: list[ReturnItemIn]
     reason: str | None = None
     register_id: int | None = None
+    refund_method: str | None = None      # cash, or a method used on the invoice
 
 
 def _returned_map(db: Session, sale_id: int) -> dict[int, int]:
@@ -53,6 +54,7 @@ def _format_return(r: Return) -> dict:
         "vat_amount": inv.money(r.vat_amount),
         "total": inv.money(r.total),
         "reason": r.reason,
+        "refund_method": r.refund_method,
         "seller": r.seller or {},
         "qr_data": r.qr_data,
         "original_issued_at": r.sale.issued_at if r.sale else None,
@@ -115,7 +117,10 @@ def returnable(sale_id: int, db: Session = Depends(get_db),
             "returned": ret,
             "remaining": si.quantity - ret,
         })
+    methods = sorted({p.method for p in sale.payments} | {"cash"})
     return {"sale_id": sale_id, "invoice_number": sale.invoice_number,
+            "refund_methods": methods, "payment_method": sale.payment_method,
+            "customer_name": sale.customer.name if sale.customer else None,
             "issued_at": sale.issued_at, "total": inv.money(sale.total), "items": lines}
 
 
@@ -144,6 +149,16 @@ def create_return(req: ReturnCreate, db: Session = Depends(get_db),
         raise HTTPException(status_code=400, detail="سبب الإرجاع مطلوب لإصدار الإشعار الدائن")
 
     sale = _find_sale(db, req.sale_id, req.invoice_number)
+    # Refund: cash is always allowed, plus any method used on the invoice.
+    paid_methods = {p.method for p in sale.payments}
+    allowed_refund = paid_methods | {"cash"}
+    refund_method = (req.refund_method or "").strip() or (
+        next(iter(paid_methods)) if len(paid_methods) == 1 else None)
+    if not refund_method:
+        raise HTTPException(status_code=400, detail="اختر طريقة الاسترداد")
+    if refund_method not in allowed_refund:
+        raise HTTPException(status_code=400,
+                            detail="طريقة الاسترداد يجب أن تكون نقداً أو إحدى طرق دفع الفاتورة الأصلية")
 
     sold = {si.product_id: si for si in
             db.query(SaleItem).filter(SaleItem.sale_id == sale.id).all()}
@@ -208,6 +223,7 @@ def create_return(req: ReturnCreate, db: Session = Depends(get_db),
         uuid=uid, previous_hash=alloc.previous_hash, invoice_hash=doc_hash, issued_at=issued_at,
         subtotal=total - vat, vat_amount=vat, total=total, seller=seller, qr_data=qr,
         reason=(req.reason or "").strip() or None,
+        refund_method=refund_method,
     )
     db.add(ret)
     db.flush()

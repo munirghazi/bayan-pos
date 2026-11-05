@@ -18,7 +18,7 @@ import sys
 from sqlalchemy import text
 from passlib.context import CryptContext
 
-from database import SessionLocal, Tenant, TenantSettings, User, Product, Sale, ensure_default_branch
+from database import SessionLocal, Tenant, TenantSettings, User, Product, Sale, ensure_default_branch, ensure_default_uom
 
 pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -65,7 +65,8 @@ def cmd_create(db, args):
         print(f"Created tenant '{t.slug}' (id={t.id}). "
               f"No admin created (pass --admin-user and --admin-pass to add one).")
     ensure_default_branch(db, t.id)
-    print("  default branch 'الفرع الرئيسي' + register 'الصندوق 1' created.")
+    ensure_default_uom(db, t.id)
+    print("  default branch 'الفرع الرئيسي' + register 'الصندوق 1' + default units created.")
 
 
 def cmd_set_active(db, args, active: bool):

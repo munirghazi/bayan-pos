@@ -29,7 +29,7 @@ def _record_metric(status_code: int, dur_ms: float):
     if dur_ms >= _SLOW_MS:
         _METRICS["slow_requests"] += 1
 from database import SessionLocal, Tenant, TenantSettings, User, ensure_default_branch, ensure_default_uom, engine
-from routers import auth, products, sales, donations, reports, locations, customers, returns, delivery, suppliers, uom, stock, purchase_orders, goods_receipts, privacy, consignment, settings as settings_router
+from routers import auth, products, sales, donations, reports, locations, customers, returns, delivery, suppliers, uom, stock, purchase_orders, goods_receipts, privacy, consignment, payment_proofs, drafts, settings as settings_router
 
 
 def bootstrap():
@@ -73,6 +73,12 @@ def bootstrap():
 
         ensure_default_branch(db, tenant.id)
         ensure_default_uom(db, tenant.id)
+
+        # Every tenant (also those created with manage.py) needs a branch and
+        # the default units of measure. Both helpers are idempotent.
+        for t in db.query(Tenant).all():
+            ensure_default_branch(db, t.id)
+            ensure_default_uom(db, t.id)
     finally:
         db.close()
 
@@ -146,6 +152,8 @@ app.include_router(purchase_orders.router, prefix="/api/purchase-orders", tags=[
 app.include_router(goods_receipts.router, prefix="/api/goods-receipts", tags=["سندات الاستلام"])
 app.include_router(privacy.router, prefix="/api/privacy", tags=["الخصوصية"])
 app.include_router(settings_router.router, prefix="/api/settings", tags=["الإعدادات"])
+app.include_router(payment_proofs.router, prefix="/api/payment-proofs", tags=["إثباتات التحويل"])
+app.include_router(drafts.router, prefix="/api/drafts", tags=["المسودات"])
 
 # --- Serve frontend build in production ---
 FRONTEND_BUILD = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")

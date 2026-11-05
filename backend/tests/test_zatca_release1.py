@@ -74,6 +74,15 @@ def _sell(client, h, pid, qty=1, **extra):
     return r.json()
 
 
+PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 64
+
+
+def _proof(client, h):
+    r = client.post("/api/payment-proofs/", headers=h, files={"file": ("t.png", PNG, "image/png")})
+    assert r.status_code == 200, r.text
+    return r.json()["id"]
+
+
 def _parse(num):
     code, typ, seq = num.split("-")
     return code, typ, int(seq)
@@ -256,7 +265,8 @@ def test_donation_rules(client):
     no_ref = client.post("/api/donations/", headers=h, json={"amount": 50, "payment_method": "card"})
     assert no_ref.status_code == 400
     r = client.post("/api/donations/", headers=h,
-                    json={"amount": 50, "payment_method": "transfer", "donor_name": "فاعل خير"})
+                    json={"amount": 50, "payment_method": "transfer", "donor_name": "فاعل خير",
+                          "proof_id": _proof(client, h)})
     assert r.status_code == 200, r.text
     d = r.json()
     assert _parse(d["receipt_number"])[1] == "DON" and d["status"] == "issued"
@@ -280,7 +290,7 @@ def test_donation_rules(client):
 def test_donation_cannot_be_deleted_only_voided(client):
     h = login(client)
     d = client.post("/api/donations/", headers=h,
-                    json={"amount": 30, "payment_method": "transfer"}).json()
+                    json={"amount": 30, "payment_method": "transfer", "proof_id": _proof(client, h)}).json()
     assert client.delete(f"/api/donations/{d['id']}", headers=h).status_code == 405
     assert client.post(f"/api/donations/{d['id']}/void", headers=h, json={"reason": " "}).status_code == 400
     v = client.post(f"/api/donations/{d['id']}/void", headers=h, json={"reason": "مكرر"})

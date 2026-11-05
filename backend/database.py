@@ -107,6 +107,7 @@ class TenantSettings(Base):
     inventory_mode = Column(String(20), default="per_branch", nullable=False)  # shared_pool | per_branch
     fatoora_enabled_default = Column(Boolean, default=False, nullable=False)
     payment_methods = Column(String(200), default="cash,card,transfer", nullable=False)
+    require_transfer_proof = Column(Boolean, nullable=False, default=True, server_default=text("true"))
     data_retention_months = Column(Integer, nullable=True)   # PDPL retention policy (null = keep)
 
     tenant = relationship("Tenant", back_populates="settings")
@@ -193,14 +194,72 @@ class Sale(Base):
     total = Column(_MONEY, nullable=False)                    # incl. VAT
     seller = Column(JSONB, nullable=False)                    # seller identity at issue time
     qr_data = Column(Text, nullable=True)                     # ZATCA TLV base64 (tax invoices)
-    payment_method = Column(String(20), nullable=False)
+    payment_method = Column(String(20), nullable=False)       # cash|card|transfer|mixed (summary)
     card_ref = Column(String(100), nullable=True)
+    change_given = Column(_MONEY, nullable=False, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="sales")
     items = relationship("SaleItem", back_populates="sale", cascade="all, delete-orphan")
+    payments = relationship("SalePayment", back_populates="sale", order_by="SalePayment.id")
     customer = relationship("Customer")
     location = relationship("Location")
+
+
+class PaymentProof(Base):
+    """An uploaded bank-transfer proof. Stored privately (not under /uploads),
+    served only through the API to the same tenant. Used by exactly one document."""
+    __tablename__ = "payment_proofs"
+    id = Column(Integer, primary_key=True)
+    tenant_id = _tenant_col()
+    stored_name = Column(String(80), nullable=False)
+    original_name = Column(String(200), nullable=True)
+    mime = Column(String(60), nullable=False)
+    size_bytes = Column(Integer, nullable=False)
+    sha256 = Column(String(64), nullable=False)
+    uploaded_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    used = Column(Boolean, nullable=False, default=False)
+    used_ref = Column(String(40), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=text("now()"))
+
+
+class SalePayment(Base):
+    """One tender on an invoice. amount = what it paid towards the invoice
+    (for cash: tendered - change). Immutable once issued (DB trigger)."""
+    __tablename__ = "sale_payments"
+    id = Column(Integer, primary_key=True)
+    tenant_id = _tenant_col()
+    sale_id = Column(Integer, ForeignKey("sales.id", ondelete="CASCADE"), nullable=False, index=True)
+    method = Column(String(20), nullable=False)
+    amount = Column(_MONEY, nullable=False)
+    tendered = Column(_MONEY, nullable=True)
+    card_ref = Column(String(100), nullable=True)
+    proof_id = Column(Integer, ForeignKey("payment_proofs.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=text("now()"))
+
+    sale = relationship("Sale", back_populates="payments")
+
+
+class PosDraft(Base):
+    """A sale or donation waiting for its transfer proof. Not a document: no
+    number, no VAT record. Its items are reserved until issued or cancelled."""
+    __tablename__ = "pos_drafts"
+    id = Column(Integer, primary_key=True)
+    tenant_id = _tenant_col()
+    kind = Column(String(10), nullable=False)            # sale | donation
+    status = Column(String(10), nullable=False, default="open")
+    location_id = Column(Integer, ForeignKey("locations.id"), nullable=False)
+    register_id = Column(Integer, ForeignKey("registers.id"), nullable=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    payload = Column(JSONB, nullable=False)
+    total = Column(_MONEY, nullable=False)
+    customer_label = Column(String(200), nullable=True)
+    issued_ref = Column(String(30), nullable=True)
+    cancel_reason = Column(String(200), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=text("now()"))
+    closed_at = Column(DateTime(timezone=True), nullable=True)
+
+    user = relationship("User")
 
 
 class SaleItem(Base):
@@ -241,6 +300,7 @@ class Donation(Base):
     note = Column(Text, nullable=True)
     payment_method = Column(String(20), nullable=False)
     card_ref = Column(String(100), nullable=True)
+    proof_id = Column(Integer, ForeignKey("payment_proofs.id"), nullable=True)
     status = Column(String(10), nullable=False, default="issued")   # issued | void
     void_reason = Column(String(300), nullable=True)
     voided_at = Column(DateTime(timezone=True), nullable=True)
@@ -486,6 +546,7 @@ class Return(Base):
     total = Column(_MONEY, nullable=False)                   # amount refunded incl. VAT
     seller = Column(JSONB, nullable=False)
     qr_data = Column(Text, nullable=True)
+    refund_method = Column(String(20), nullable=True)        # cash | card | transfer
     reason = Column(String(300), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -594,6 +655,7 @@ class RegisterClosing(Base):
     card_sales = Column(Float, nullable=False, default=0, server_default=text("0"))
     transfer_sales = Column(Float, nullable=False, default=0, server_default=text("0"))
     other_sales = Column(Float, nullable=False, default=0, server_default=text("0"))
+    cash_refunds = Column(Float, nullable=False, default=0, server_default=text("0"))
     expected_cash = Column(Float, nullable=False, default=0, server_default=text("0"))
     counted_cash = Column(Float, nullable=False, default=0, server_default=text("0"))
     variance = Column(Float, nullable=False, default=0, server_default=text("0"))

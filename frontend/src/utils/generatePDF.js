@@ -2,6 +2,16 @@ import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import QRCode from 'qrcode';
 
+// The sender in share texts is ALWAYS the logged-in tenant (white-label).
+export function senderName() {
+  try {
+    const z = JSON.parse(localStorage.getItem('zatca_settings') || '{}');
+    return z.sellerName || localStorage.getItem('tenant_name') || '';
+  } catch (e) {
+    return localStorage.getItem('tenant_name') || '';
+  }
+}
+
 /**
  * Generate a PDF from a DOM element (receipt)
  * @param {HTMLElement} element - The DOM element to convert to PDF
@@ -112,7 +122,7 @@ export async function shareViaWhatsApp(element, filename, phone = '', message = 
 
   // Open WhatsApp with message
   const encodedMessage = encodeURIComponent(
-    message || `إيصال من جمعية بيان بمكة المكرمة - ${filename}`
+    message || `${filename} — ${senderName()}`
   );
   
   const whatsappUrl = phone
@@ -137,8 +147,9 @@ export async function shareViaEmail(element, filename, email = '', subject = '',
   // Download the PDF first
   await downloadPDF(element, filename);
 
-  const defaultSubject = subject || `إيصال من جمعية بيان بمكة المكرمة - ${filename}`;
-  const defaultBody = body || `السلام عليكم ورحمة الله وبركاته\n\nمرفق إيصال رقم ${filename}\n\nجزاكم الله خيراً\nجمعية بيان بمكة المكرمة`;
+  const name = senderName();
+  const defaultSubject = subject || `${filename} — ${name}`;
+  const defaultBody = body || `السلام عليكم ورحمة الله وبركاته\n\nمرفق المستند ${filename}\n\nمع التحية\n${name}`;
 
   const mailtoUrl = `mailto:${email}?subject=${encodeURIComponent(defaultSubject)}&body=${encodeURIComponent(defaultBody)}`;
   window.location.href = mailtoUrl;

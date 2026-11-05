@@ -175,18 +175,29 @@ const Receipt = forwardRef(({ sale, type = 'sale', donation = null, creditNote =
               <span>{money(doc.total)} <SarIcon size={14} /></span>
             </div>
             {type === 'sale' && (
-              <>
-                <div className="flex justify-between text-xs text-gray-500 mt-1">
-                  <span>طريقة الدفع</span>
-                  <span>{paymentMethodAr[doc.payment_method] || doc.payment_method}</span>
-                </div>
-                {doc.card_ref && (
-                  <div className="flex justify-between text-xs text-gray-500">
-                    <span>رمز العملية</span>
-                    <span dir="ltr">{doc.card_ref}</span>
+              <div className="mt-1 space-y-0.5">
+                {(doc.payments && doc.payments.length ? doc.payments : [{ method: doc.payment_method, amount: doc.total, card_ref: doc.card_ref }]).map((p, i) => (
+                  <div key={i} className="flex justify-between text-xs text-gray-500">
+                    <span>
+                      {paymentMethodAr[p.method] || p.method}
+                      {p.card_ref ? <span dir="ltr"> ({p.card_ref})</span> : null}
+                    </span>
+                    <span>{money(p.method === 'cash' && p.tendered ? p.tendered : p.amount)}</span>
+                  </div>
+                ))}
+                {Number(doc.change_given) > 0 && (
+                  <div className="flex justify-between text-xs text-gray-600 font-medium">
+                    <span>الباقي للعميل</span>
+                    <span>{money(doc.change_given)}</span>
                   </div>
                 )}
-              </>
+              </div>
+            )}
+            {type === 'credit_note' && doc.refund_method && (
+              <div className="flex justify-between text-xs text-gray-500 mt-1">
+                <span>طريقة الاسترداد</span>
+                <span>{paymentMethodAr[doc.refund_method] || doc.refund_method}</span>
+              </div>
             )}
           </div>
 

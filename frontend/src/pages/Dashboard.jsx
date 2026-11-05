@@ -70,7 +70,7 @@ export default function Dashboard() {
 
   if (!data) return null;
 
-  const paymentMethodAr = { cash: 'نقدي', card: 'شبكة', transfer: 'تحويل' };
+  const paymentMethodAr = { cash: 'نقدي', card: 'شبكة', transfer: 'تحويل', mixed: 'متعدد' };
 
   // Donations figures exist only when the tenant has donations enabled (server decides).
   const donationsOn = !!data.donations_enabled && data.today.donations_total !== undefined;

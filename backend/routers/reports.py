@@ -120,9 +120,11 @@ def get_sales_report(
     sales = q.order_by(Sale.issued_at.desc(), Sale.id.desc()).all()
     credit_notes = rq.order_by(Return.issued_at.desc(), Return.id.desc()).all()
 
-    def tot(rows, attr, method=None):
-        return sum(inv.d(getattr(r, attr) or 0) for r in rows
-                   if method is None or r.payment_method == method)
+    def tot(rows, attr):
+        return sum(inv.d(getattr(r, attr) or 0) for r in rows)
+
+    def by_method(method):     # from the tenders, so split invoices count correctly
+        return sum(inv.d(p.amount or 0) for s in sales for p in s.payments if p.method == method)
 
     sales_list = []
     for s in sales:
@@ -143,6 +145,10 @@ def get_sales_report(
             "vat_amount": _f(s.vat_amount),
             "total": _f(s.total),
             "payment_method": s.payment_method,
+            "payments": [{"method": p.method, "amount": _f(p.amount), "card_ref": p.card_ref,
+                          "proof_id": p.proof_id} for p in s.payments],
+            "change_given": _f(s.change_given),
+            "customer_name": s.customer.name if s.customer else None,
             "issued_at": inv.iso_z(s.issued_at),
             "created_at": inv.iso_z(s.issued_at),
             "user_name": s.user.full_name if s.user else None,
@@ -163,6 +169,7 @@ def get_sales_report(
             "total": _f(r.total),
             "vat_amount": _f(r.vat_amount),
             "reason": r.reason,
+            "refund_method": r.refund_method,
             "issued_at": inv.iso_z(r.issued_at),
         } for r in credit_notes],
         "summary": {
@@ -170,9 +177,11 @@ def get_sales_report(
             "count": len(sales),
             "subtotal": _f(tot(sales, "subtotal")),
             "vat_total": _f(gross_vat),
-            "cash_total": _f(tot(sales, "total", "cash")),
-            "card_total": _f(tot(sales, "total", "card")),
-            "transfer_total": _f(tot(sales, "total", "transfer")),
+            "cash_total": _f(by_method("cash")),
+            "card_total": _f(by_method("card")),
+            "transfer_total": _f(by_method("transfer")),
+            "mixed_count": sum(1 for s in sales if s.payment_method == "mixed"),
+            "cash_refunds": _f(sum(inv.d(r.total) for r in credit_notes if r.refund_method == "cash")),
             "credit_notes_count": len(credit_notes),
             "credit_notes_total": _f(cn_total),
             "credit_notes_vat": _f(cn_vat),
@@ -213,6 +222,7 @@ def get_donations_report(
             "note": d.note,
             "payment_method": d.payment_method,
             "card_ref": d.card_ref,
+            "proof_id": d.proof_id,
             "status": d.status,
             "void_reason": d.void_reason,
             "issued_at": inv.iso_z(d.issued_at),

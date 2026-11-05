@@ -67,6 +67,7 @@ export const salesAPI = {
   getAll: (skip = 0, limit = 50) => api.get(`/sales/?skip=${skip}&limit=${limit}`),
   get: (id) => api.get(`/sales/${id}`),
   getByNumber: (number) => api.get(`/sales/by-number/${encodeURIComponent(number)}`),
+  search: (params) => api.get('/sales/search', { params }),
 };
 
 // ===================== Donations =====================
@@ -166,6 +167,24 @@ export const returnsAPI = {
   getAll: () => api.get('/returns/'),
   get: (id) => api.get(`/returns/${id}`),
   create: (data) => api.post('/returns/', data),
+};
+
+// ===================== Transfer proofs & drafts (Release 1.1) =====================
+export const proofsAPI = {
+  upload: (file) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    return api.post('/payment-proofs/', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+  },
+  file: (id) => api.get(`/payment-proofs/${id}/file`, { responseType: 'blob' }),
+};
+
+export const draftsAPI = {
+  list: (kind) => api.get(`/drafts/${kind ? `?kind=${kind}` : ''}`),
+  createSale: (data) => api.post('/drafts/sale', data),
+  createDonation: (data) => api.post('/drafts/donation', data),
+  issue: (id, data) => api.post(`/drafts/${id}/issue`, data),
+  cancel: (id, reason) => api.post(`/drafts/${id}/cancel`, { reason }),
 };
 
 export const deliveryAPI = {

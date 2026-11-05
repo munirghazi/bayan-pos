@@ -46,6 +46,7 @@ export default function Settings() {
 
   // POS settings
   const [posSettings, setPosSettings] = useState(getPOSSettings());
+  const [requireProof, setRequireProof] = useState(true);
   const [logoPreview, setLogoPreview] = useState('');
   const [brandForm, setBrandForm] = useState({ primaryColor: '#2254A4', accentColor: '#4DBA7F', brandName: '', faviconUrl: '', fontFamily: 'Cairo', uiRadius: 'default', receiptFooter: '' });
   const logoInputRef = useRef(null);
@@ -92,6 +93,7 @@ export default function Settings() {
       });
       // payment methods are tenant-level (backend). Mirror onto the device settings
       // so the POS payment options reflect the tenant configuration.
+      setRequireProof(data.require_transfer_proof !== false);
       if (typeof data.payment_methods === 'string' && data.payment_methods.length) {
         const enabled = data.payment_methods.split(',').map((x) => x.trim()).filter(Boolean);
         const pm = { cash: enabled.includes('cash'), card: enabled.includes('card'), transfer: enabled.includes('transfer') };
@@ -727,6 +729,27 @@ export default function Settings() {
                 </label>
               ))}
             </div>
+
+            <label className="flex items-center gap-4 p-4 rounded-xl border-2 border-amber-200 bg-amber-50/40 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={requireProof}
+                onChange={(e) => {
+                  const v = e.target.checked;
+                  setRequireProof(v);
+                  settingsAPI.updateTenant({ require_transfer_proof: v })
+                    .then(() => toast.success(v ? 'إرفاق إثبات التحويل إلزامي' : 'إرفاق إثبات التحويل اختياري'))
+                    .catch(() => { setRequireProof(!v); toast.error('تعذر الحفظ'); });
+                }}
+                className="w-5 h-5 text-bayan-green rounded focus:ring-bayan-green"
+              />
+              <div>
+                <p className="font-medium text-gray-800">إلزام إرفاق إثبات التحويل البنكي</p>
+                <p className="text-xs text-gray-500">
+                  عند الدفع بالتحويل يجب إرفاق صورة أو PDF للإثبات قبل إصدار الفاتورة أو الإيصال، أو حفظ العملية كمسودة حتى يُرفق.
+                </p>
+              </div>
+            </label>
           </div>
 
           {/* Donation Toggle */}

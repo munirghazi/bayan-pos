@@ -213,7 +213,8 @@ def _register_or_404(db, register_id):
 
 
 def _aggregate_since(db, register_id):
-    """Totals for a register since its last closing (or all time)."""
+    """Totals for a register since its last closing (or all time), per tender."""
+    from database import SalePayment, Return
     last = (db.query(RegisterClosing)
               .filter(RegisterClosing.register_id == register_id)
               .order_by(RegisterClosing.closed_at.desc()).first())
@@ -225,22 +226,32 @@ def _aggregate_since(db, register_id):
     agg = {"cash": 0.0, "card": 0.0, "transfer": 0.0, "other": 0.0}
     total = 0.0
     for sale in sales:
-        m = (sale.payment_method or "").lower()
-        total += sale.total or 0.0
-        agg[m if m in agg else "other"] += sale.total or 0.0
+        total += float(sale.total or 0)
+        for p in sale.payments:
+            m = (p.method or "").lower()
+            agg[m if m in agg else "other"] += float(p.amount or 0)
+    # cash refunds paid out of this drawer (credit notes refunded in cash)
+    rq = (db.query(Return).join(Sale, Sale.id == Return.sale_id)
+            .filter(Return.refund_method == "cash")
+            .filter((Return.register_id == register_id) |
+                    ((Return.register_id.is_(None)) & (Sale.register_id == register_id))))
+    if since is not None:
+        rq = rq.filter(Return.created_at > since)
+    agg["cash_refunds"] = sum(float(r.total or 0) for r in rq.all())
     return since, len(sales), total, agg
 
 
 def _zreport(register_id, since, count, total, agg, opening_float=0.0,
              counted_cash=None, closed=False, closed_at=None):
-    expected_cash = opening_float + agg["cash"]
+    expected_cash = opening_float + agg["cash"] - agg.get("cash_refunds", 0)
     out = {
         "register_id": register_id,
         "period_from": since.isoformat() if since else None,
         "period_to": (closed_at or datetime.utcnow()).isoformat(),
         "sales_count": count,
         "total_sales": round(total, 2),
-        "by_method": {k: round(v, 2) for k, v in agg.items()},
+        "by_method": {k: round(v, 2) for k, v in agg.items() if k != "cash_refunds"},
+        "cash_refunds": round(agg.get("cash_refunds", 0), 2),
         "opening_float": round(opening_float, 2),
         "expected_cash": round(expected_cash, 2),
         "closed": closed,
@@ -266,12 +277,12 @@ def close_register(register_id: int, req: CloseRegisterRequest,
     """Close a register: snapshot sales since the last close and record cash variance."""
     _register_or_404(db, register_id)
     since, count, total, agg = _aggregate_since(db, register_id)
-    expected_cash = req.opening_float + agg["cash"]
+    expected_cash = req.opening_float + agg["cash"] - agg.get("cash_refunds", 0)
     closing = RegisterClosing(
         register_id=register_id, opened_at=since, closed_by=user.username,
         opening_float=req.opening_float, sales_count=count, total_sales=total,
         cash_sales=agg["cash"], card_sales=agg["card"], transfer_sales=agg["transfer"],
-        other_sales=agg["other"], expected_cash=expected_cash,
+        other_sales=agg["other"], cash_refunds=agg.get("cash_refunds", 0), expected_cash=expected_cash,
         counted_cash=req.counted_cash, variance=req.counted_cash - expected_cash,
         note=req.note)
     db.add(closing)
@@ -295,6 +306,7 @@ def list_closings(register_id: int, db: Session = Depends(get_db),
         "closed_by": r.closed_by, "sales_count": r.sales_count,
         "total_sales": r.total_sales, "cash_sales": r.cash_sales, "card_sales": r.card_sales,
         "transfer_sales": r.transfer_sales, "other_sales": r.other_sales,
+        "cash_refunds": r.cash_refunds,
         "opening_float": r.opening_float, "expected_cash": r.expected_cash,
         "counted_cash": r.counted_cash, "variance": r.variance, "note": r.note,
     } for r in rows]

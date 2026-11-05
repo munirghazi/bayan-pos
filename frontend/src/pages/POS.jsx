@@ -3,7 +3,11 @@ import { productsAPI, salesAPI, donationsAPI, registersAPI, customersAPI, settin
 import { Link } from 'react-router-dom';
 import { COUNTRIES, flagOf, validateLocalPhone } from '../utils/countries';
 import { deliveryAPI, uomAPI } from '../services/api';
-import Receipt from '../components/Receipt';
+import DocumentModal from '../components/DocumentModal';
+import PaymentModal from '../components/PaymentModal';
+import DraftsModal from '../components/DraftsModal';
+import { uploadProof, openProof } from '../utils/proofs';
+import { draftsAPI } from '../services/api';
 import { SarIcon } from '../components/SarIcon';
 import { printReceipt } from '../utils/printReceipt';
 import { downloadPDF, shareViaWhatsApp, pdfToBase64 } from '../utils/generatePDF';
@@ -24,13 +28,6 @@ import {
   HiOutlineMail,
 } from 'react-icons/hi';
 
-// WhatsApp icon
-const WhatsAppIcon = () => (
-  <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
-  </svg>
-);
-
 const ALL_PAYMENT_METHODS = [
   { key: 'cash', icon: HiOutlineCash, label: 'نقدي' },
   { key: 'card', icon: HiOutlineCreditCard, label: 'شبكة' },
@@ -43,8 +40,12 @@ export default function POS() {
   const [consignLots, setConsignLots] = useState([]);
   const [search, setSearch] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('cash');
-  const [cashReceived, setCashReceived] = useState('');
-  const [cardRef, setCardRef] = useState('');
+  const [showPayment, setShowPayment] = useState(false);
+  const [showDrafts, setShowDrafts] = useState(false);
+  const [draftCount, setDraftCount] = useState(0);
+  const [requireProof, setRequireProof] = useState(true);
+  const [donationProof, setDonationProof] = useState(null);
+  const donationFileRef = useRef(null);
   const [loading, setLoading] = useState(false);
   const [lastSale, setLastSale] = useState(null);
   const [showReceipt, setShowReceipt] = useState(false);
@@ -81,6 +82,7 @@ export default function POS() {
   useEffect(() => {
     if (!caps.sales_enabled) return;
     settingsAPI.getTenant().then(({ data }) => {
+      setRequireProof(data.require_transfer_proof !== false);
       const required = ['building_number', 'street_name', 'district', 'city', 'postal_code'];
       const missing = required.some((k) => !data[k] || String(data[k]).trim() === '');
       setAddrIncomplete(missing);
@@ -107,7 +109,10 @@ export default function POS() {
     setShowDonation(true);
   };
 
+  const loadDraftCount = () => draftsAPI.list().then(({ data }) => setDraftCount(data.length)).catch(() => {});
+
   useEffect(() => {
+    loadDraftCount();
     loadProducts();
     if (getCapabilities().sales_enabled) loadConsignLots();
     loadRegisters();
@@ -319,53 +324,48 @@ export default function POS() {
   };
 
   const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  const change = paymentMethod === 'cash' && cashReceived
-    ? parseFloat(cashReceived) - total
-    : 0;
 
-  const handleCheckout = async () => {
-    if (cart.length === 0) {
-      toast.error('السلة فارغة');
-      return;
-    }
+  const saleItems = () => cart.filter((item) => item.quantity > 0).map((item) => ({
+    product_id: item.product_id,
+    quantity: item.quantity,
+    uom_id: item.uom_id || null,
+    consignment_item_id: item.consignment_item_id || null,
+  }));
 
-    if (paymentMethod === 'card' && !cardRef.trim()) {
-      toast.error('الرجاء إدخال رمز العملية');
-      return;
-    }
-    if (registers.length > 0 && !registerId) {
-      toast.error('الرجاء اختيار الصندوق');
-      return;
-    }
+  const resetAfterSale = () => {
+    setShowPayment(false);
+    setCart([]);
+    setSelectedCustomer(null);
+    loadProducts();
+    loadConsignLots();
+    loadDraftCount();
+  };
+
+  // Step 1: check the cart, then open the payment window (split payment lives there).
+  const handleCheckout = () => {
+    if (cart.length === 0) { toast.error('السلة فارغة'); return; }
+    if (registers.length > 0 && !registerId) { toast.error('الرجاء اختيار الصندوق'); return; }
+    setShowPayment(true);
+  };
+
+  // Step 2: issue the invoice with its tenders.
+  const issueSale = async (payments) => {
     if (checkoutRef.current) return;
     checkoutRef.current = true;
-
     setLoading(true);
     try {
       if (!saleIdemRef.current) saleIdemRef.current = newIdemKey();
       const res = await salesAPI.create({
-        items: cart.filter((item) => item.quantity > 0).map((item) => ({
-          product_id: item.product_id,
-          quantity: item.quantity,
-          uom_id: item.uom_id || null,
-          consignment_item_id: item.consignment_item_id || null,
-        })),
-        payment_method: paymentMethod,
-        card_ref: paymentMethod === 'card' ? cardRef.trim() : null,
+        items: saleItems(),
+        payments,
         register_id: registerId ? parseInt(registerId) : null,
         customer_id: selectedCustomer ? selectedCustomer.id : null,
       }, saleIdemRef.current);
       saleIdemRef.current = null;   // new key for the next, distinct sale
-
       setLastSale(res.data);
       setLastDonation(null);
       setShowReceipt(true);
-      setCart([]);
-      setCashReceived('');
-      setCardRef('');
-      setSelectedCustomer(null);
-      loadProducts();
-      loadConsignLots();
+      resetAfterSale();
       toast.success(`تم إصدار الفاتورة ${res.data.invoice_number}`);
     } catch (err) {
       toast.error(apiError(err, 'خطأ في عملية البيع'));
@@ -375,7 +375,26 @@ export default function POS() {
     }
   };
 
-  const handleDonation = async () => {
+  // Transfer proof not ready: park the sale as a draft (no number, items reserved).
+  const draftSale = async (payments) => {
+    setLoading(true);
+    try {
+      await draftsAPI.createSale({
+        items: saleItems(),
+        payments,
+        register_id: registerId ? parseInt(registerId) : null,
+        customer_id: selectedCustomer ? selectedCustomer.id : null,
+      });
+      resetAfterSale();
+      toast.success('حُفظت المسودة — أرفق الإثبات من «المسودات» لإصدار الفاتورة');
+    } catch (err) {
+      toast.error(apiError(err, 'تعذّر حفظ المسودة'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDonation = async (asDraft = false) => {
     const amount = parseFloat(donationAmount);
     if (!amount || amount <= 0) {
       toast.error('الرجاء إدخال مبلغ صحيح');
@@ -386,6 +405,11 @@ export default function POS() {
       toast.error('اختر طريقة الدفع: شبكة أو تحويل بنكي');
       return;
     }
+    const needsProof = donationMethod === 'transfer' && requireProof && !donationProof;
+    if (needsProof && !asDraft) {
+      toast.error('أرفق إثبات التحويل أو احفظ التبرع كمسودة');
+      return;
+    }
     if (donationMethod === 'card' && !donationCardRef.trim()) {
       toast.error('الرجاء إدخال رمز العملية');
       return;
@@ -393,15 +417,25 @@ export default function POS() {
 
     setLoading(true);
     try {
-      if (!donationIdemRef.current) donationIdemRef.current = newIdemKey();
-      const res = await donationsAPI.create({
+      const body = {
         donor_name: donorName || null,
         amount,
         note: donationNote || null,
         payment_method: donationMethod,
         card_ref: donationMethod === 'card' ? donationCardRef.trim() : null,
+        proof_id: donationMethod === 'transfer' && donationProof ? donationProof.id : null,
         register_id: registerId ? parseInt(registerId) : null,
-      }, donationIdemRef.current);
+      };
+      if (asDraft) {
+        await draftsAPI.createDonation(body);
+        setShowDonation(false);
+        setDonationAmount(''); setDonorName(''); setDonationNote(''); setDonationCardRef(''); setDonationProof(null);
+        loadDraftCount();
+        toast.success('حُفظ التبرع كمسودة — أرفق الإثبات من «المسودات» لإصدار الإيصال');
+        return;
+      }
+      if (!donationIdemRef.current) donationIdemRef.current = newIdemKey();
+      const res = await donationsAPI.create(body, donationIdemRef.current);
       donationIdemRef.current = null;
 
       setLastDonation(res.data);
@@ -412,63 +446,12 @@ export default function POS() {
       setDonorName('');
       setDonationNote('');
       setDonationCardRef('');
-      toast.success('تم تسجيل التبرع بنجاح - جزاكم الله خيراً');
+      setDonationProof(null);
+      toast.success(`تم إصدار الإيصال ${res.data.receipt_number}`);
     } catch (err) {
       toast.error(apiError(err, 'خطأ في تسجيل التبرع'));
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handlePrint = () => {
-    printReceipt(receiptRef);
-  };
-
-  const getInvoiceFilename = () => {
-    if (lastSale) return `فاتورة_${lastSale.invoice_number}`;
-    if (lastDonation) return `إيصال_تبرع_${lastDonation.receipt_number}`;
-    return 'إيصال';
-  };
-
-  const handleDownloadPDF = async () => {
-    if (!receiptRef.current) return;
-    try {
-      toast.loading('جاري إنشاء PDF...');
-      await downloadPDF(receiptRef.current, getInvoiceFilename());
-      toast.dismiss();
-      toast.success('تم تحميل PDF بنجاح');
-    } catch (err) {
-      toast.dismiss();
-      toast.error('خطأ في إنشاء PDF');
-    }
-  };
-
-  const handleShareWhatsApp = async () => {
-    if (!receiptRef.current) return;
-    try {
-      toast.loading('جاري إنشاء PDF...');
-      await shareViaWhatsApp(receiptRef.current, getInvoiceFilename());
-      toast.dismiss();
-    } catch (err) {
-      toast.dismiss();
-      toast.error('خطأ في المشاركة');
-    }
-  };
-
-  const handleShareEmail = async () => {
-    if (!receiptRef.current) return;
-    const suggested = (selectedCustomer && selectedCustomer.email) || '';
-    const to = window.prompt('البريد الإلكتروني للعميل:', suggested);
-    if (!to) return;
-    try {
-      toast.loading('جاري إرسال الفاتورة...');
-      const pdf_base64 = await pdfToBase64(receiptRef.current, getInvoiceFilename());
-      await deliveryAPI.sendEmail({ to, filename: `${getInvoiceFilename()}.pdf`, pdf_base64, subject: 'فاتورتك' });
-      toast.dismiss();
-      toast.success('تم إرسال الفاتورة بالبريد');
-    } catch (err) {
-      toast.dismiss();
-      toast.error(apiError(err, 'تعذّر إرسال البريد'));
     }
   };
 
@@ -499,6 +482,16 @@ export default function POS() {
               className="w-full pr-10 pl-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-bayan-green focus:border-transparent outline-none"
             />
           </div>
+          {draftCount > 0 && (
+            <button
+              onClick={() => setShowDrafts(true)}
+              className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white px-4 py-3 rounded-xl transition-all font-medium"
+              title="عمليات بانتظار إثبات التحويل"
+            >
+              المسودات
+              <span className="bg-white text-amber-600 rounded-full px-2 text-sm font-bold">{draftCount}</span>
+            </button>
+          )}
           {posSettings.showDonation && caps.donations_enabled && donationPaymentMethods.length > 0 && (
             <button
               onClick={openDonation}
@@ -719,37 +712,7 @@ export default function POS() {
             ))}
           </div>
 
-          {/* Cash input */}
-          {paymentMethod === 'cash' && cart.length > 0 && (
-            <div>
-              <input
-                type="number"
-                value={cashReceived}
-                onChange={(e) => setCashReceived(e.target.value)}
-                placeholder="المبلغ المستلم"
-                className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none text-center text-lg"
-              />
-              {change > 0 && (
-                <p className="text-center mt-2 text-lg font-bold text-emerald-600">
-                  الباقي: {change.toFixed(2)} <SarIcon size={16} />
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* Card reference input */}
-          {paymentMethod === 'card' && cart.length > 0 && (
-            <div>
-              <input
-                type="text"
-                value={cardRef}
-                onChange={(e) => setCardRef(e.target.value)}
-                placeholder="رمز العملية *"
-                className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none text-center text-lg"
-                dir="ltr"
-              />
-            </div>
-          )}
+          <p className="text-xs text-gray-400 text-center -mt-1">اختر طريقة الدفع الأولى — يمكن إضافة طرق أخرى (دفع متعدد) في نافذة الدفع</p>
 
           {/* Checkout button */}
           <button
@@ -757,7 +720,7 @@ export default function POS() {
             disabled={cart.length === 0 || loading}
             className="w-full bg-bayan-green hover:bg-bayan-dark text-white font-bold py-3 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed text-lg"
           >
-            {loading ? 'جاري المعالجة...' : 'إتمام البيع'}
+            {loading ? 'جاري المعالجة...' : 'الدفع وإصدار الفاتورة'}
           </button>
         </div>
       </div>
@@ -825,6 +788,25 @@ export default function POS() {
                 ))}
               </div>
 
+              {/* Transfer proof for donation */}
+              {donationMethod === 'transfer' && (
+                <div className="flex items-center gap-2">
+                  {donationProof ? (
+                    <>
+                      <button onClick={() => openProof(donationProof.id)} className="text-sm text-green-700 hover:underline">✓ {donationProof.name}</button>
+                      <button onClick={() => setDonationProof(null)} className="text-xs text-gray-400 hover:text-red-500 mr-auto">تغيير</button>
+                    </>
+                  ) : (
+                    <button onClick={() => donationFileRef.current?.click()}
+                      className="flex-1 px-3 py-2 rounded-lg border-2 border-dashed border-amber-400 text-amber-700 hover:bg-amber-50 text-sm">
+                      📎 إرفاق إثبات التحويل {requireProof ? '*' : '(اختياري)'}
+                    </button>
+                  )}
+                  <input ref={donationFileRef} type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="hidden"
+                    onChange={async (e) => { const f = e.target.files?.[0]; e.target.value = ''; const p = await uploadProof(f); if (p) setDonationProof({ id: p.id, name: p.original_name || 'إثبات' }); }} />
+                </div>
+              )}
+
               {/* Card reference for donation */}
               {donationMethod === 'card' && (
                 <div>
@@ -840,9 +822,18 @@ export default function POS() {
               )}
 
               <div className="flex gap-3 mt-4">
+                {donationMethod === 'transfer' && requireProof && !donationProof && (
+                  <button
+                    onClick={() => handleDonation(true)}
+                    disabled={loading}
+                    className="px-4 py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-medium disabled:opacity-50"
+                  >
+                    حفظ كمسودة
+                  </button>
+                )}
                 <button
-                  onClick={handleDonation}
-                  disabled={loading}
+                  onClick={() => handleDonation(false)}
+                  disabled={loading || (donationMethod === 'transfer' && requireProof && !donationProof)}
                   className="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 rounded-xl transition-all disabled:opacity-50"
                 >
                   {loading ? 'جاري التسجيل...' : 'تسجيل التبرع'}
@@ -859,66 +850,42 @@ export default function POS() {
         </div>
       )}
 
-      {/* Receipt Modal */}
-      {showReceipt && (lastSale || lastDonation) && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-auto">
-            <div ref={receiptRef}>
-              <Receipt
-                sale={lastSale}
-                type={lastDonation ? 'donation' : 'sale'}
-                donation={lastDonation}
-              />
-            </div>
-            <div className="p-4 border-t no-print space-y-3">
-              {/* Primary actions */}
-              <div className="flex gap-3">
-                <button
-                  onClick={handlePrint}
-                  className="flex-1 flex items-center justify-center gap-2 bg-bayan-green hover:bg-bayan-dark text-white font-bold py-3 rounded-xl transition-all"
-                >
-                  <HiOutlinePrinter />
-                  طباعة
-                </button>
-                <button
-                  onClick={handleDownloadPDF}
-                  className="flex-1 flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-all"
-                >
-                  <HiOutlineDocumentDownload />
-                  تحميل PDF
-                </button>
-              </div>
+      {/* Payment window (split payment, transfer proof, draft) */}
+      {showPayment && (
+        <PaymentModal
+          total={Math.round(total * 100) / 100}
+          methods={enabledPaymentMethods.map((m) => m.key)}
+          initialMethod={paymentMethod}
+          requireProof={requireProof}
+          busy={loading}
+          onIssue={issueSale}
+          onDraft={draftSale}
+          onClose={() => setShowPayment(false)}
+        />
+      )}
 
-              {/* Share actions */}
-              <div className="flex gap-3">
-                <button
-                  onClick={handleShareWhatsApp}
-                  className="flex-1 flex items-center justify-center gap-2 bg-green-500 hover:bg-green-600 text-white font-medium py-2.5 rounded-xl transition-all"
-                >
-                  <WhatsAppIcon />
-                  واتساب
-                </button>
-                <button
-                  onClick={handleShareEmail}
-                  className="flex-1 flex items-center justify-center gap-2 bg-orange-500 hover:bg-orange-600 text-white font-medium py-2.5 rounded-xl transition-all"
-                >
-                  <HiOutlineMail className="text-xl" />
-                  إيميل
-                </button>
-                <button
-                  onClick={() => {
-                    setShowReceipt(false);
-                    setLastSale(null);
-                    setLastDonation(null);
-                  }}
-                  className="px-6 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl transition-all"
-                >
-                  إغلاق
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+      {showDrafts && (
+        <DraftsModal
+          products={products}
+          onClose={() => { setShowDrafts(false); loadDraftCount(); }}
+          onIssued={(kind, doc) => {
+            setShowDrafts(false);
+            loadDraftCount();
+            loadProducts();
+            if (kind === 'sale') { setLastSale(doc); setLastDonation(null); } else { setLastDonation(doc); setLastSale(null); }
+            setShowReceipt(true);
+          }}
+        />
+      )}
+
+      {/* Issued document: print / PDF / WhatsApp / email */}
+      {showReceipt && (lastSale || lastDonation) && (
+        <DocumentModal
+          type={lastDonation ? 'donation' : 'sale'}
+          doc={lastDonation || lastSale}
+          phone={lastSale?.customer_phone || ''}
+          onClose={() => { setShowReceipt(false); setLastSale(null); setLastDonation(null); }}
+        />
       )}
     </div>
   );
