@@ -151,3 +151,53 @@ export function Tabs({ value, onChange, tabs }) {
     </div>
   );
 }
+
+// ---------------- MoneyInput (tester: "0.00 mask, add the halalas") ----------------
+// Accepts digits and one decimal point (Arabic-Indic digits are converted); when the
+// field is left, the value is formatted with exactly 2 decimals: 5 → 5.00, 5.5 → 5.50.
+const AR_DIGITS = { '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4', '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9', '٫': '.', '،': '.' };
+export function cleanMoney(raw) {
+  let v = String(raw ?? '').replace(/[٠-٩٫،]/g, (c) => AR_DIGITS[c]).replace(/[^\d.]/g, '');
+  const i = v.indexOf('.');
+  if (i !== -1) v = v.slice(0, i + 1) + v.slice(i + 1).replace(/\./g, '').slice(0, 2);
+  return v;
+}
+export function formatMoney(v) {
+  if (v === '' || v == null) return '';
+  const n = parseFloat(v);
+  return Number.isFinite(n) ? n.toFixed(2) : '';
+}
+export function MoneyInput({ value, onChange, onBlur, className, placeholder = '0.00', ...rest }) {
+  return (
+    <input type="text" inputMode="decimal" dir="ltr" autoComplete="off" {...rest}
+      value={value ?? ''}
+      placeholder={placeholder}
+      onChange={(e) => onChange(cleanMoney(e.target.value))}
+      onBlur={(e) => { onChange(formatMoney(e.target.value)); onBlur?.(e); }}
+      onFocus={(e) => e.target.select()}
+      className={cx('text-left font-mono', className)} />
+  );
+}
+
+// ---------------- SwitchRow ----------------
+// The whole row is the click target (tester: "can't select bundled / VAT-exempt"
+// — only the tiny switch reacted, and its off state looked disabled).
+export function SwitchRow({ checked, onChange, title, hint, tone = 'green', disabled }) {
+  const on = { green: 'bg-emerald-500', orange: 'bg-orange-500' }[tone];
+  return (
+    <label className={cx('flex items-center gap-3 p-3 rounded-xl border transition-all select-none',
+      disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:border-gray-300',
+      checked ? 'border-transparent bg-emerald-50/60 ring-1 ring-emerald-200' : 'border-gray-200 bg-white')}>
+      <input type="checkbox" className="sr-only" checked={!!checked} disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)} />
+      <span className={cx('relative inline-flex shrink-0 w-11 h-6 rounded-full transition-colors', checked ? on : 'bg-gray-300')}>
+        <span className={cx('absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all', checked ? 'left-0.5' : 'left-[22px]')} />
+      </span>
+      <span className="flex-1">
+        <span className="block text-sm font-medium text-gray-800">{title}</span>
+        {hint && <span className="block text-xs text-gray-500 leading-5">{hint}</span>}
+      </span>
+      <span className={cx('text-xs font-medium', checked ? 'text-emerald-700' : 'text-gray-400')}>{checked ? 'نعم' : 'لا'}</span>
+    </label>
+  );
+}

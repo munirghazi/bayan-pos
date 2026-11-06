@@ -10,11 +10,11 @@ APPDIR=/srv/bayan-pos
 
 echo "— Listening services"
 command -v ss >/dev/null || { echo "install iproute2 (ss) first"; exit 1; }
-ss -tlnH | awk '{print $4}' | sort -u | while read -r a; do
+for a in $(ss -tlnH | awk '{print $4}' | sort -u); do
   case "$a" in
-    127.0.0.1:*|\[::1\]:*|::1:*) ;;
+    127.0.0.*|\[::1\]:*|::1:*) ;;          # localhost only (incl. 127.0.0.53%lo = local DNS)
     *:22|*:80|*:443) ;;
-    *) echo "FAIL  service listening on all interfaces: $a";;
+    *) bad "service listening on all interfaces: $a (ufw blocks it, but better switch it off)";;
   esac
 done
 ss -tlnH | grep -qE '(0\.0\.0\.0|\*|\[::\]):5432\b' && bad "PostgreSQL listens publicly" || ok "PostgreSQL only on localhost"
@@ -54,7 +54,7 @@ if [ -f "$ENV" ]; then
   grep -q '^BOOTSTRAP_ADMIN_PASSWORD=.\+' "$ENV" && warn "BOOTSTRAP_ADMIN_PASSWORD still set (remove after first setup)" || ok "no bootstrap password in .env"
 else bad "$ENV not found"; fi
 p=$(stat -c %a $APPDIR/backend/storage/proofs 2>/dev/null); [ -n "$p" ] && { [ "$p" -le 750 ] && ok "proofs folder $p" || bad "proofs folder too open ($p)"; }
-[ -d $APPDIR/.git ] && git -C $APPDIR ls-files | grep -qE '(^|/)\.env$|\.dev_secret|\.pem$|id_rsa' && bad "a secret file is tracked in git" || ok "no secret files tracked in git"
+[ -d $APPDIR/.git ] && sudo -u "$(stat -c %U $APPDIR)" git -C $APPDIR ls-files | grep -qE '(^|/)\.env$|\.dev_secret|\.pem$|id_rsa' && bad "a secret file is tracked in git" || ok "no secret files tracked in git"
 
 echo; echo "— Database"
 pg_ver=$(sudo -u postgres psql -Atc "show server_version" 2>/dev/null); ok "PostgreSQL $pg_ver"

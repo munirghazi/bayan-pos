@@ -8,6 +8,7 @@ from datetime import datetime
 from database import get_db, Location, Register, RegisterClosing, Sale
 from tenant_audit import tenant_audit
 from routers.auth import get_current_user, require_admin, User
+from perms import require_perm
 
 router = APIRouter()             # mounted at /api/locations
 registers_router = APIRouter()   # mounted at /api/registers
@@ -103,7 +104,7 @@ def list_locations(db: Session = Depends(get_db), user: User = Depends(get_curre
 
 @router.post("/", response_model=LocationResponse)
 def create_location(req: LocationCreate, db: Session = Depends(get_db),
-                    user: User = Depends(require_admin)):
+                    user: User = Depends(require_perm("branches"))):
     code = _clean_code(db, req.code) if req.code else None
     loc = Location(name=req.name, code=code)  # tenant_id: DB default; code: DB trigger if None
     db.add(loc)
@@ -114,7 +115,7 @@ def create_location(req: LocationCreate, db: Session = Depends(get_db),
 
 @router.put("/{location_id}", response_model=LocationResponse)
 def update_location(location_id: int, req: LocationUpdate, db: Session = Depends(get_db),
-                    user: User = Depends(require_admin)):
+                    user: User = Depends(require_perm("branches"))):
     loc = db.query(Location).filter(Location.id == location_id).first()
     if not loc:
         raise HTTPException(status_code=404, detail="الفرع غير موجود")
@@ -134,7 +135,7 @@ def update_location(location_id: int, req: LocationUpdate, db: Session = Depends
 
 @router.delete("/{location_id}")
 def delete_location(location_id: int, db: Session = Depends(get_db),
-                    user: User = Depends(require_admin)):
+                    user: User = Depends(require_perm("branches"))):
     loc = db.query(Location).filter(Location.id == location_id).first()
     if not loc:
         raise HTTPException(status_code=404, detail="الفرع غير موجود")
@@ -156,7 +157,7 @@ def list_registers(location_id: int | None = None, db: Session = Depends(get_db)
 
 @registers_router.post("/", response_model=RegisterResponse)
 def create_register(req: RegisterCreate, db: Session = Depends(get_db),
-                    user: User = Depends(require_admin)):
+                    user: User = Depends(require_perm("branches"))):
     loc = db.query(Location).filter(Location.id == req.location_id).first()
     if not loc:
         raise HTTPException(status_code=400, detail="الفرع غير موجود")
@@ -169,7 +170,7 @@ def create_register(req: RegisterCreate, db: Session = Depends(get_db),
 
 @registers_router.put("/{register_id}", response_model=RegisterResponse)
 def update_register(register_id: int, req: RegisterUpdate, db: Session = Depends(get_db),
-                    user: User = Depends(require_admin)):
+                    user: User = Depends(require_perm("branches"))):
     reg = db.query(Register).filter(Register.id == register_id).first()
     if not reg:
         raise HTTPException(status_code=404, detail="الصندوق غير موجود")
@@ -188,7 +189,7 @@ def update_register(register_id: int, req: RegisterUpdate, db: Session = Depends
 
 @registers_router.delete("/{register_id}")
 def delete_register(register_id: int, db: Session = Depends(get_db),
-                    user: User = Depends(require_admin)):
+                    user: User = Depends(require_perm("branches"))):
     reg = db.query(Register).filter(Register.id == register_id).first()
     if not reg:
         raise HTTPException(status_code=404, detail="الصندوق غير موجود")
@@ -262,7 +263,7 @@ def _zreport(register_id, since, count, total, agg, opening_float=0.0,
     return out
 
 
-@registers_router.get("/{register_id}/z-report")
+@registers_router.get("/{register_id}/z-report", dependencies=[Depends(require_perm("register_close", "reports"))])
 def register_zreport(register_id: int, db: Session = Depends(get_db),
                      user: User = Depends(get_current_user)):
     """Preview the current open totals for a register without closing it."""
@@ -271,7 +272,7 @@ def register_zreport(register_id: int, db: Session = Depends(get_db),
     return _zreport(register_id, since, count, total, agg)
 
 
-@registers_router.post("/{register_id}/close")
+@registers_router.post("/{register_id}/close", dependencies=[Depends(require_perm("register_close"))])
 def close_register(register_id: int, req: CloseRegisterRequest,
                    db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """Close a register: snapshot sales since the last close and record cash variance."""
@@ -294,7 +295,7 @@ def close_register(register_id: int, req: CloseRegisterRequest,
                     counted_cash=req.counted_cash, closed=True, closed_at=closing.closed_at)
 
 
-@registers_router.get("/{register_id}/closings")
+@registers_router.get("/{register_id}/closings", dependencies=[Depends(require_perm("register_close", "reports"))])
 def list_closings(register_id: int, db: Session = Depends(get_db),
                   user: User = Depends(get_current_user)):
     _register_or_404(db, register_id)

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import jwt
 from passlib.context import CryptContext
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -33,6 +33,7 @@ class UserCreate(BaseModel):
     full_name: str
     role: str = "cashier"
     location_id: int | None = None
+    permissions: list[str] | None = None     # non-admin: ticked permissions (default: role template)
 
 
 class UserResponse(BaseModel):
@@ -40,12 +41,25 @@ class UserResponse(BaseModel):
     username: str
     full_name: str
     role: str
+    role_label: str = ""
     is_active: bool
     must_change_password: bool = False
     location_id: int | None = None
+    permissions: list[str] = []               # effective (admin: all)
 
     class Config:
         from_attributes = True
+
+    @model_validator(mode="before")
+    @classmethod
+    def _effective(cls, v):
+        if isinstance(v, dict) or not hasattr(v, "role"):
+            return v
+        import perms
+        return {"id": v.id, "username": v.username, "full_name": v.full_name, "role": v.role,
+                "role_label": perms.ROLE_LABELS.get(v.role, v.role), "is_active": bool(v.is_active),
+                "must_change_password": bool(v.must_change_password), "location_id": v.location_id,
+                "permissions": perms.effective(v)}
 
 
 class TokenResponse(BaseModel):
@@ -62,6 +76,7 @@ class UserUpdate(BaseModel):
     is_active: bool | None = None
     password: str | None = None
     location_id: int | None = None
+    permissions: list[str] | None = None
 
 
 class ChangePasswordRequest(BaseModel):
@@ -263,6 +278,36 @@ def get_users(db: Session = Depends(get_db), current_user: User = Depends(requir
     return db.query(User).all()
 
 
+def _role_and_permissions(role: str | None, permissions: list[str] | None):
+    import perms
+    role = (role or "cashier").strip()
+    if role not in perms.ROLES:
+        raise HTTPException(status_code=400, detail="الدور غير معروف")
+    if role == "admin":
+        return "admin", None
+    if permissions is None:
+        permissions = perms.TEMPLATES[role][1] if role in perms.TEMPLATES else []
+    unknown = [p for p in permissions if p not in perms.CATALOG]
+    if unknown:
+        raise HTTPException(status_code=400, detail="صلاحيات غير معروفة: " + "، ".join(unknown))
+    permissions = perms.clean(permissions)
+    if not permissions:
+        raise HTTPException(status_code=400, detail="اختر صلاحية واحدة على الأقل")
+    return role, permissions
+
+
+def _ensure_another_admin(db: Session, user: User) -> None:
+    others = db.query(User).filter(User.role == "admin", User.is_active == True, User.id != user.id).count()  # noqa: E712
+    if others == 0:
+        raise HTTPException(status_code=400, detail="يجب أن يبقى مدير نظام واحد على الأقل")
+
+
+@router.get("/permissions")
+def permissions_catalog(current_user: User = Depends(get_current_user)):
+    import perms
+    return perms.catalog_out()
+
+
 @router.post("/users", response_model=UserResponse)
 def create_user(request: UserCreate, db: Session = Depends(get_db),
                 current_user: User = Depends(require_admin)):
@@ -270,12 +315,17 @@ def create_user(request: UserCreate, db: Session = Depends(get_db),
     if existing:
         raise HTTPException(status_code=400, detail="اسم المستخدم موجود مسبقاً")
     _validate_location(db, request.location_id)
+    role, permissions = _role_and_permissions(request.role, request.permissions)
+    if len(request.password or "") < 8:
+        raise HTTPException(status_code=400, detail="كلمة المرور يجب أن تكون 8 أحرف على الأقل")
     user = User(
         username=request.username,
         password_hash=pwd_context.hash(request.password),
         full_name=request.full_name,
-        role=request.role,
+        role=role,
+        permissions=permissions,
         location_id=request.location_id,
+        must_change_password=True,          # the person sets their own password at first login
     )  # tenant_id filled by DB default from app.current_tenant
     db.add(user)
     db.commit()
@@ -291,9 +341,22 @@ def update_user(user_id: int, request: UserUpdate, db: Session = Depends(get_db)
         raise HTTPException(status_code=404, detail="المستخدم غير موجود")
     if request.full_name is not None:
         user.full_name = request.full_name
-    if request.role is not None:
-        user.role = request.role
+    if request.role is not None or request.permissions is not None:
+        role, permissions = _role_and_permissions(request.role or user.role,
+                                                  request.permissions if request.permissions is not None
+                                                  else (None if request.role and request.role != user.role else user.permissions))
+        if user.id == current_user.id and role != "admin":
+            raise HTTPException(status_code=400, detail="لا يمكنك إزالة صلاحية المدير عن حسابك")
+        if user.role == "admin" and role != "admin":
+            _ensure_another_admin(db, user)
+        if (role, permissions) != (user.role, user.permissions):
+            end_sessions(user)              # new permissions take effect at the next login
+        user.role, user.permissions = role, permissions
     if request.is_active is not None:
+        if not request.is_active and user.id == current_user.id:
+            raise HTTPException(status_code=400, detail="لا يمكنك تعطيل حسابك")
+        if not request.is_active and user.role == "admin":
+            _ensure_another_admin(db, user)
         user.is_active = request.is_active
         if not request.is_active:
             end_sessions(user)
@@ -318,6 +381,8 @@ def delete_user(user_id: int, db: Session = Depends(get_db),
         raise HTTPException(status_code=404, detail="المستخدم غير موجود")
     if user.id == current_user.id:
         raise HTTPException(status_code=400, detail="لا يمكنك حذف حسابك الخاص")
+    if user.role == "admin":
+        _ensure_another_admin(db, user)
     db.delete(user)
     db.commit()
     return {"message": "تم حذف المستخدم بنجاح"}

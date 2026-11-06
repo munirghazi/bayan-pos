@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from database import (get_db, Consignor, ConsignmentIntake, ConsignmentItem,
                       ConsignmentLedger, Supplier, Product)
 from routers.auth import get_current_user, require_admin, User
+from perms import require_perm
 
 router = APIRouter()   # mounted at /api/consignment
 
@@ -74,7 +75,7 @@ def list_consignors(db: Session = Depends(get_db), user: User = Depends(get_curr
 
 @router.post("/consignors")
 def create_consignor(req: ConsignorCreate, db: Session = Depends(get_db),
-                     user: User = Depends(require_admin)):
+                     user: User = Depends(require_perm("consignment"))):
     if req.supplier_id is not None:
         if not db.query(Supplier).filter(Supplier.id == req.supplier_id).first():
             raise HTTPException(status_code=400, detail="المورّد غير موجود")
@@ -88,7 +89,7 @@ def create_consignor(req: ConsignorCreate, db: Session = Depends(get_db),
 
 @router.put("/consignors/{cid}")
 def update_consignor(cid: int, req: ConsignorUpdate, db: Session = Depends(get_db),
-                     user: User = Depends(require_admin)):
+                     user: User = Depends(require_perm("consignment"))):
     c = _consignor_or_404(db, cid)
     for f, v in req.model_dump(exclude_unset=True).items():
         setattr(c, f, v)
@@ -99,7 +100,7 @@ def update_consignor(cid: int, req: ConsignorUpdate, db: Session = Depends(get_d
 # ---------- intake ----------
 @router.post("/intake")
 def create_intake(req: IntakeCreate, db: Session = Depends(get_db),
-                  user: User = Depends(require_admin)):
+                  user: User = Depends(require_perm("consignment"))):
     _consignor_or_404(db, req.consignor_id)
     if not req.lines:
         raise HTTPException(status_code=400, detail="أضف صنفاً واحداً على الأقل")
@@ -183,7 +184,7 @@ class ReturnRequest(BaseModel):
 
 @router.post("/return")
 def return_to_consignor(req: ReturnRequest, db: Session = Depends(get_db),
-                        user: User = Depends(require_admin)):
+                        user: User = Depends(require_perm("consignment"))):
     """Return unsold consigned goods to the consignor (removes them from sellable stock)."""
     ci = db.query(ConsignmentItem).filter(ConsignmentItem.id == req.consignment_item_id).first()
     if not ci:
@@ -241,7 +242,7 @@ def statement(cid: int, db: Session = Depends(get_db), user: User = Depends(get_
 
 @router.post("/payout")
 def create_payout(req: PayoutCreate, db: Session = Depends(get_db),
-                  user: User = Depends(require_admin)):
+                  user: User = Depends(require_perm("consignment"))):
     _consignor_or_404(db, req.consignor_id)
     if req.amount <= 0:
         raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")

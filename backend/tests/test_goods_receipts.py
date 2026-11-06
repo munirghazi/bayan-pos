@@ -10,6 +10,9 @@ PASSWORD = settings.bootstrap_admin_password
 FUTURE = (datetime.date.today() + datetime.timedelta(days=365)).isoformat()
 
 
+VALID_DOC = {"cr": "1010123456", "vat": "300000000000003", "national_address": "RRRD2929"}
+PDF_DOC = b"%PDF-1.4\n%doc\n"
+
 @pytest.fixture(scope="module")
 def client():
     with TestClient(main.app) as c:
@@ -32,7 +35,8 @@ def compliant_supplier(client, h):
     sid = client.post("/api/suppliers/", headers=h, json={"name": "مورّد استلام"}).json()["id"]
     for dt in ("cr", "vat", "national_address"):
         client.put(f"/api/suppliers/{sid}/document", headers=h,
-                   json={"doc_type": dt, "number": f"{dt}1", "expiry_date": FUTURE})
+                   json={"doc_type": dt, "number": VALID_DOC[dt], "expiry_date": FUTURE})
+        client.post(f"/api/suppliers/{sid}/document/upload", headers=h, data={"doc_type": dt}, files={"file": ("d.pdf", PDF_DOC, "application/pdf")})
         client.put(f"/api/suppliers/{sid}/document/{dt}/verify", headers=h)
     return sid
 

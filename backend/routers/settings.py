@@ -13,6 +13,8 @@ from sqlalchemy.orm import Session
 from database import get_db, TenantSettings, Tenant
 from routers.auth import get_current_user, require_admin, User
 
+from capabilities import invoice_identity_gaps
+
 router = APIRouter()
 
 UPLOADS_DIR = "uploads"
@@ -44,6 +46,7 @@ class TenantSettingsResponse(BaseModel):
     show_en_address: bool = False
     receipt_thanks: str | None = None
     default_thanks: str | None = None
+    invoice_gaps: dict | None = None        # {"address": [...], "platform": [...], "ready": bool}
     seller_name: str | None = None
     vat_number: str | None = None
     national_address: str | None = None
@@ -158,6 +161,7 @@ def _settings_response(db, row, tid):
         show_en_address=bool(row.show_en_address),
         receipt_thanks=row.receipt_thanks,
         default_thanks=entities.THANKS[ent["entity_group"]],
+        invoice_gaps=invoice_identity_gaps(db, tid) if tid else None,
         # legal name + VAT number: the platform record first (settings = legacy)
         seller_name=(t.name if t and t.name else row.seller_name),
         vat_number=((t.vat_number if t else None) or row.vat_number),

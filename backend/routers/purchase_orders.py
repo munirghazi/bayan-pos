@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from database import get_db, PurchaseOrder, PurchaseOrderLine, Supplier, Product, Uom, User
 from capabilities import require_purchasing
 from routers.auth import get_current_user, require_admin
+from perms import require_perm
 from routers.suppliers import require_compliant, supplier_compliance
 
 router = APIRouter()
@@ -114,7 +115,7 @@ def get_po(po_id: int, db: Session = Depends(get_db), user: User = Depends(get_c
 
 @router.post("/")
 def create_po(req: POCreate, db: Session = Depends(get_db),
-              user: User = Depends(require_admin), _caps: dict = Depends(require_purchasing)):
+              user: User = Depends(require_perm("purchasing")), _caps: dict = Depends(require_purchasing)):
     sup = db.query(Supplier).filter(Supplier.id == req.supplier_id,
                                     Supplier.is_active == True).first()  # noqa: E712
     if not sup:
@@ -134,7 +135,7 @@ def create_po(req: POCreate, db: Session = Depends(get_db),
 
 @router.put("/{po_id}")
 def update_po(po_id: int, req: POUpdate, db: Session = Depends(get_db),
-              user: User = Depends(require_admin)):
+              user: User = Depends(require_perm("purchasing"))):
     po = _load(db, po_id)
     if po.status != DRAFT:
         raise HTTPException(status_code=400, detail="لا يمكن تعديل أمر شراء بعد اعتماده أو إرساله")
@@ -155,7 +156,7 @@ def update_po(po_id: int, req: POUpdate, db: Session = Depends(get_db),
 
 @router.post("/{po_id}/submit")
 def submit_po(po_id: int, db: Session = Depends(get_db),
-              user: User = Depends(require_admin)):
+              user: User = Depends(require_perm("purchasing"))):
     po = _load(db, po_id)
     if po.status != DRAFT:
         raise HTTPException(status_code=400, detail="يمكن إرسال المسودّات فقط")
@@ -168,7 +169,7 @@ def submit_po(po_id: int, db: Session = Depends(get_db),
 
 @router.post("/{po_id}/approve")
 def approve_po(po_id: int, db: Session = Depends(get_db),
-               user: User = Depends(require_admin)):
+               user: User = Depends(require_perm("po_approve"))):
     po = _load(db, po_id)
     if po.status not in (DRAFT, SUBMITTED):
         raise HTTPException(status_code=400, detail="لا يمكن اعتماد هذا الأمر في حالته الحالية")
@@ -183,7 +184,7 @@ def approve_po(po_id: int, db: Session = Depends(get_db),
 
 @router.post("/{po_id}/cancel")
 def cancel_po(po_id: int, db: Session = Depends(get_db),
-              user: User = Depends(require_admin)):
+              user: User = Depends(require_perm("purchasing"))):
     po = _load(db, po_id)
     if po.status in (CANCELLED, "received", "closed"):
         raise HTTPException(status_code=400, detail="لا يمكن إلغاء هذا الأمر")
@@ -195,7 +196,7 @@ def cancel_po(po_id: int, db: Session = Depends(get_db),
 
 @router.delete("/{po_id}")
 def delete_po(po_id: int, db: Session = Depends(get_db),
-              user: User = Depends(require_admin)):
+              user: User = Depends(require_perm("purchasing"))):
     po = _load(db, po_id)
     if po.status != DRAFT:
         raise HTTPException(status_code=400, detail="يمكن حذف المسودّات فقط")

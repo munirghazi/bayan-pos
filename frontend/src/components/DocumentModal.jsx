@@ -59,8 +59,10 @@ export default function DocumentModal({ type = 'sale', doc, onClose, phone = '',
 
   const onWhatsApp = () => run('جاري تجهيز المستند...', async () => {
     const intl = (phone || '').replace(/\D/g, '');
-    await shareViaWhatsApp(ref.current, filename, intl, `${filename.replace(/_/g, ' ')} — ${senderName()}\nالملف المرفق بصيغة PDF.`);
-    toast.success('تم تحميل PDF — أرفقه في محادثة واتساب');
+    const how = await shareViaWhatsApp(ref.current, filename, intl, `${filename.replace(/_/g, ' ')} — ${senderName()}\nالملف المرفق بصيغة PDF.`);
+    if (how === 'web') {
+      toast.success('تم تحميل PDF — أرفقه في محادثة واتساب. (من الكمبيوتر يلزم تسجيل الدخول في واتساب ويب؛ من الجوال يُرسل الملف مباشرة)', { duration: 7000 });
+    }
   });
 
   const onEmail = async () => {

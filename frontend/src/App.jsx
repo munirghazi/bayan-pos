@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
+import { HiOutlineMenu } from 'react-icons/hi';
+import { canOpen, homePath } from './utils/perms';
 import { Toaster } from 'react-hot-toast';
 import Sidebar from './components/Sidebar';
 import { authAPI, settingsAPI } from './services/api';
@@ -28,8 +30,15 @@ import PurchaseOrders from './pages/PurchaseOrders';
 function ProtectedLayout() {
   const token = localStorage.getItem('token');
   const [capsVersion, setCapsVersion] = useState(0);
+  const [menuOpen, setMenuOpen] = useState(false);          // phone / tablet drawer
+  const location = useLocation();
+  useEffect(() => { setMenuOpen(false); }, [location.pathname]);
   useEffect(() => {
     if (!token) return;
+    // refresh the user (role + permissions) so the menu matches what the server allows
+    authAPI.getMe()
+      .then((r) => { localStorage.setItem('user', JSON.stringify(r.data)); setCapsVersion((v) => v + 1); })
+      .catch(() => {});
     authAPI.getCapabilities()
       .then((r) => { saveCapabilities(r.data); setCapsVersion((v) => v + 1); })
       .catch(() => {});
@@ -43,14 +52,33 @@ function ProtectedLayout() {
   const user = JSON.parse(localStorage.getItem('user') || '{}');
   if (user.must_change_password) return <Navigate to="/change-password" replace />;
 
+  const tenantName = localStorage.getItem('tenant_name') || '';
   return (
     <div className="flex h-[100dvh] overflow-hidden bg-gray-50">
-      <Sidebar key={capsVersion} />
-      <main className="app-main flex-1 p-6 overflow-auto">
-        <Outlet />
-      </main>
+      <Sidebar key={capsVersion} mobileOpen={menuOpen} onClose={() => setMenuOpen(false)} />
+      <div className="flex-1 min-w-0 flex flex-col">
+        {/* phone / tablet: the menu is a drawer opened from this bar */}
+        <div className="lg:hidden flex items-center gap-3 px-3 h-12 bg-bayan-dark text-white shrink-0">
+          <button onClick={() => setMenuOpen(true)} aria-label="القائمة" className="p-2 -m-1 rounded-lg hover:bg-white/10">
+            <HiOutlineMenu className="text-2xl" />
+          </button>
+          <span className="font-bold truncate">{tenantName}</span>
+        </div>
+        <main className="app-main flex-1 p-6 overflow-auto">
+          <Outlet />
+        </main>
+      </div>
     </div>
   );
+}
+
+// A page the user has no permission for is unreachable, even by URL.
+function RequirePerm({ path, children }) {
+  return canOpen(path) ? children : <Navigate to={homePath()} replace />;
+}
+
+function Home() {
+  return canOpen('/') ? <Dashboard /> : <Navigate to={homePath()} replace />;
 }
 
 // A page whose feature is switched off for this tenant is unreachable, even by URL.
@@ -66,7 +94,7 @@ function ChangePasswordRoute() {
 
 function PublicRoute({ children }) {
   const token = localStorage.getItem('token');
-  if (token) return <Navigate to="/" replace />;
+  if (token) return <Navigate to={homePath()} replace />;
   return children;
 }
 
@@ -97,21 +125,21 @@ export default function App() {
           element={<ChangePasswordRoute />}
         />
         <Route element={<ProtectedLayout />}>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/pos" element={<POS />} />
-          <Route path="/products" element={<Catalog />} />
-          <Route path="/donations" element={<RequireCap flag="donations_enabled"><Donations /></RequireCap>} />
-          <Route path="/reports" element={<Reports />} />
-          <Route path="/branches" element={<Branches />} />
-          <Route path="/register-closing" element={<RegisterClosing />} />
-          <Route path="/returns" element={<Returns />} />
-          <Route path="/suppliers" element={<Suppliers />} />
-          <Route path="/uom" element={<UnitsOfMeasure />} />
-          <Route path="/inventory" element={<Inventory />} />
-          <Route path="/purchase-orders" element={<PurchaseOrders />} />
-          <Route path="/settings" element={<Settings />} />
-          <Route path="/privacy" element={<Privacy />} />
-          <Route path="/consignment" element={<Catalog />} />
+          <Route path="/" element={<Home />} />
+          <Route path="/pos" element={<RequirePerm path="/pos"><POS /></RequirePerm>} />
+          <Route path="/products" element={<RequirePerm path="/products"><Catalog /></RequirePerm>} />
+          <Route path="/donations" element={<RequireCap flag="donations_enabled"><RequirePerm path="/donations"><Donations /></RequirePerm></RequireCap>} />
+          <Route path="/reports" element={<RequirePerm path="/reports"><Reports /></RequirePerm>} />
+          <Route path="/branches" element={<RequirePerm path="/branches"><Branches /></RequirePerm>} />
+          <Route path="/register-closing" element={<RequirePerm path="/register-closing"><RegisterClosing /></RequirePerm>} />
+          <Route path="/returns" element={<RequirePerm path="/returns"><Returns /></RequirePerm>} />
+          <Route path="/suppliers" element={<RequirePerm path="/suppliers"><Suppliers /></RequirePerm>} />
+          <Route path="/uom" element={<RequirePerm path="/uom"><UnitsOfMeasure /></RequirePerm>} />
+          <Route path="/inventory" element={<RequirePerm path="/inventory"><Inventory /></RequirePerm>} />
+          <Route path="/purchase-orders" element={<RequirePerm path="/purchase-orders"><PurchaseOrders /></RequirePerm>} />
+          <Route path="/settings" element={<RequirePerm path="/settings"><Settings /></RequirePerm>} />
+          <Route path="/privacy" element={<RequirePerm path="/privacy"><Privacy /></RequirePerm>} />
+          <Route path="/consignment" element={<RequirePerm path="/consignment"><Catalog /></RequirePerm>} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

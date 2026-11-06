@@ -117,6 +117,18 @@ export async function downloadPDF(element, filename = 'invoice') {
  * @param {string} message - Pre-filled message
  */
 export async function shareViaWhatsApp(element, filename, phone = '', message = '') {
+  // Phones / tablets: hand the PDF itself to the share sheet → pick WhatsApp,
+  // no WhatsApp Web login needed (tester feedback). Desktop: download + wa.me.
+  try {
+    const blob = await generatePDFBlob(element, filename);
+    const file = new File([blob], `${filename}.pdf`, { type: 'application/pdf' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], text: message || `${filename} — ${senderName()}` });
+      return 'shared';
+    }
+  } catch (e) {
+    if (e && e.name === 'AbortError') return 'cancelled';   // the user closed the share sheet
+  }
   // Download the PDF first
   await downloadPDF(element, filename);
 
@@ -130,6 +142,7 @@ export async function shareViaWhatsApp(element, filename, phone = '', message = 
     : `https://wa.me/?text=${encodedMessage}`;
   
   window.open(whatsappUrl, '_blank');
+  return 'web';
 }
 
 /**

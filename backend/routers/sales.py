@@ -23,6 +23,7 @@ from database import (get_db, Sale, SaleItem, SalePayment, Product, Customer, Co
 from kits import explode_to_leaves
 from routers.auth import get_current_user, User
 from stock import record_movement, to_base_qty
+from perms import require_perm
 
 router = APIRouter()
 
@@ -284,7 +285,7 @@ def issue_sale(db, request: SaleCreate, user, exclude_draft_id: int | None = Non
 
 # ===================== Routes =====================
 
-@router.post("/", response_model=SaleResponse)
+@router.post("/", response_model=SaleResponse, dependencies=[Depends(require_perm("sell"))])
 def create_sale(request: SaleCreate, db: Session = Depends(get_db),
                 current_user: User = Depends(get_current_user),
                 _caps: dict = Depends(require_sales),

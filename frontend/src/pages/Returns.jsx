@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { can } from '../utils/perms';
 import { returnsAPI, salesAPI, apiError } from '../services/api';
 import toast from 'react-hot-toast';
 import { HiOutlineReceiptRefund, HiOutlineSearch, HiOutlinePrinter, HiOutlineArrowRight } from 'react-icons/hi';
@@ -15,7 +16,7 @@ const EMPTY = { q: '', customer: '', date_from: daysAgo(30), date_to: riyadhToda
 
 export default function Returns() {
   const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
-  const isAdmin = currentUser.role === 'admin';
+  const isAdmin = can('returns');   // permission, not role
 
   // ---- invoice finder
   const [filters, setFilters] = useState(EMPTY);
@@ -85,7 +86,7 @@ export default function Returns() {
     if (items.length === 0) { toast.error('حدد كمية واحدة على الأقل للإرجاع'); return; }
     if (!reason.trim()) { toast.error('سبب الإرجاع مطلوب لإصدار الإشعار الدائن'); return; }
     if (!refundMethod) { toast.error('اختر طريقة الاسترداد'); return; }
-    if (!isAdmin) { toast.error('تنفيذ المرتجعات يتطلب صلاحية مدير'); return; }
+    if (!isAdmin) { toast.error('ليست لديك صلاحية المرتجعات'); return; }
     if (submittingRef.current) return;
     submittingRef.current = true;
     try {
@@ -261,12 +262,12 @@ export default function Returns() {
               <span className="text-lg font-bold text-gray-800">قيمة الاسترداد: {refundTotal.toFixed(2)} ر.س</span>
               <button onClick={submit}
                 disabled={refundTotal <= 0 || !isAdmin || !reason.trim() || !refundMethod}
-                title={!isAdmin ? 'المرتجعات تتطلب صلاحية مدير' : ''}
+                title={!isAdmin ? 'ليست لديك صلاحية المرتجعات' : ''}
                 className="flex items-center gap-2 bg-bayan-green hover:bg-bayan-dark disabled:opacity-40 disabled:cursor-not-allowed text-white px-6 py-2 rounded-lg transition-all">
                 <HiOutlineReceiptRefund /> إصدار إشعار دائن
               </button>
             </div>
-            {!isAdmin && <p className="text-xs text-amber-600 text-left">تنفيذ المرتجعات يتطلب صلاحية مدير.</p>}
+            {!isAdmin && <p className="text-xs text-amber-600 text-left">ليست لديك صلاحية المرتجعات.</p>}
           </div>
         </div>
       )}

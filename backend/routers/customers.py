@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db, Customer
 from routers.auth import get_current_user, require_admin, User
+from perms import require_perm
 
 router = APIRouter()
 
@@ -65,7 +66,7 @@ def get_customer(customer_id: int, db: Session = Depends(get_db),
     return c
 
 
-@router.post("/", response_model=CustomerResponse)
+@router.post("/", response_model=CustomerResponse, dependencies=[Depends(require_perm("sell", "customers"))])
 def create_customer(req: CustomerCreate, db: Session = Depends(get_db),
                     user: User = Depends(get_current_user)):
     c = Customer(**req.model_dump())  # tenant_id filled by DB default
@@ -77,7 +78,7 @@ def create_customer(req: CustomerCreate, db: Session = Depends(get_db),
 
 @router.put("/{customer_id}", response_model=CustomerResponse)
 def update_customer(customer_id: int, req: CustomerUpdate, db: Session = Depends(get_db),
-                    user: User = Depends(require_admin)):
+                    user: User = Depends(require_perm("customers"))):
     c = db.query(Customer).filter(Customer.id == customer_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="العميل غير موجود")
@@ -90,7 +91,7 @@ def update_customer(customer_id: int, req: CustomerUpdate, db: Session = Depends
 
 @router.delete("/{customer_id}")
 def delete_customer(customer_id: int, db: Session = Depends(get_db),
-                    user: User = Depends(require_admin)):
+                    user: User = Depends(require_perm("customers"))):
     c = db.query(Customer).filter(Customer.id == customer_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="العميل غير موجود")

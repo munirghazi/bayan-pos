@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { can } from '../utils/perms';
 import { productsAPI, uomAPI, stockAPI, apiError } from '../services/api';
 import toast from 'react-hot-toast';
 import { HiOutlineArchive, HiOutlinePlusCircle, HiOutlineAdjustments } from 'react-icons/hi';
@@ -113,7 +114,7 @@ export default function Inventory() {
 
       {selected && (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {can('stock_adjust') && <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Stock in */}
             <div className="bg-white rounded-xl border shadow-sm p-4 space-y-3">
               <h2 className="font-bold text-gray-800 flex items-center gap-2"><HiOutlinePlusCircle className="text-bayan-green" /> إدخال مخزون</h2>
@@ -144,7 +145,7 @@ export default function Inventory() {
                 placeholder="ملاحظة (اختياري)" className="w-full px-3 py-2 rounded-lg border border-gray-300 outline-none text-sm text-right" />
               <button onClick={doAdjust} className="w-full bg-amber-500 hover:bg-amber-600 text-white py-2 rounded-lg transition-all">تسوية</button>
             </div>
-          </div>
+          </div>}
 
           {/* Ledger */}
           <div className="bg-white rounded-xl border shadow-sm overflow-hidden">

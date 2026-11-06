@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { MoneyInput } from '../components/ui';
+import { can } from '../utils/perms';
 import { purchaseOrdersAPI, goodsReceiptsAPI, suppliersAPI, productsAPI, uomAPI, apiError } from '../services/api';
 import toast from 'react-hot-toast';
 import PrintLabelsModal from '../components/PrintLabelsModal';
@@ -141,12 +143,12 @@ export default function PurchaseOrders() {
           <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
             <HiOutlineClipboardList className="text-bayan-green" /> أوامر الشراء
           </h1>
-          <p className="text-gray-500 mt-1">لا يمكن إرسال أو اعتماد أمر شراء لمورّد غير متوافق المستندات</p>
+          <p className="text-gray-500 mt-1">لا يمكن إرسال أو اعتماد أمر شراء لمورّد غير معتمد المستندات</p>
         </div>
-        <button onClick={() => setCreating(!creating)}
+        {can('purchasing') && <button onClick={() => setCreating(!creating)}
           className="flex items-center gap-2 bg-bayan-green hover:bg-bayan-dark text-white px-5 py-2 rounded-lg transition-all">
           {creating ? <HiOutlineX /> : <HiOutlinePlus />} {creating ? 'إلغاء' : 'أمر شراء جديد'}
-        </button>
+        </button>}
       </div>
 
       {/* Create form */}
@@ -159,12 +161,12 @@ export default function PurchaseOrders() {
                 className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none">
                 <option value="">اختر مورّداً…</option>
                 {suppliers.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}{s.is_compliant ? '' : ' (غير متوافق)'}</option>
+                  <option key={s.id} value={s.id}>{s.name}{s.is_compliant ? '' : ' (غير معتمد)'}</option>
                 ))}
               </select>
               {selectedSupplier && !selectedSupplier.is_compliant && (
                 <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
-                  <HiOutlineExclamationCircle /> هذا المورّد غير متوافق — يمكن حفظ المسودّة لكن لا يمكن إرسالها أو اعتمادها
+                  <HiOutlineExclamationCircle /> هذا المورّد غير معتمد — يمكن حفظ المسودّة لكن لا يمكن إرسالها أو اعتمادها
                 </p>
               )}
             </div>
@@ -195,8 +197,8 @@ export default function PurchaseOrders() {
                   <option value="">—</option>
                   {unitsForProduct(ln.product_id).map((u) => (<option key={u.id} value={u.id}>{u.name}</option>))}
                 </select>
-                <input type="number" step="any" value={ln.unit_cost} onChange={(e) => setLine(i, { unit_cost: e.target.value })}
-                  className="col-span-2 px-2 py-2 rounded-lg border border-gray-300 outline-none text-sm text-center" placeholder="0.00" />
+                <MoneyInput value={ln.unit_cost} onChange={(v) => setLine(i, { unit_cost: v })}
+                  className="col-span-2 px-2 py-2 rounded-lg border border-gray-300 outline-none text-sm text-center" />
                 <button onClick={() => removeLine(i)} className="col-span-1 text-red-400 hover:text-red-600 flex justify-center"><HiOutlineTrash /></button>
               </div>
             ))}
@@ -232,7 +234,7 @@ export default function PurchaseOrders() {
                     </div>
                     <div className="flex items-center gap-3">
                       <span className="text-gray-600 text-sm">{po.total.toFixed(2)} ر.س</span>
-                      {(po.status === 'approved' || po.status === 'receiving') && (
+                      {(po.status === 'approved' || po.status === 'receiving') && can('receiving') && (
                         <button onClick={(e) => { e.stopPropagation(); setExpanded(po.id); openReceive(po); }}
                           className="bg-bayan-green hover:bg-bayan-dark text-white px-3 py-1 rounded text-xs whitespace-nowrap">استلام</button>
                       )}
@@ -266,18 +268,18 @@ export default function PurchaseOrders() {
                       <div className="flex flex-wrap gap-2">
                         {po.status === 'draft' && (
                           <>
-                            <button onClick={() => act(purchaseOrdersAPI.submit, po.id, 'تم الإرسال')} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded text-sm">إرسال</button>
-                            <button onClick={() => act(purchaseOrdersAPI.approve, po.id, 'تم الاعتماد')} className="bg-green-600 hover:bg-green-700 text-white px-4 py-1.5 rounded text-sm">اعتماد</button>
-                            <button onClick={() => act(purchaseOrdersAPI.delete, po.id, 'تم الحذف')} className="bg-red-100 hover:bg-red-200 text-red-700 px-4 py-1.5 rounded text-sm">حذف</button>
+                            {can('purchasing') && <button onClick={() => act(purchaseOrdersAPI.submit, po.id, 'تم الإرسال')} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded text-sm">إرسال</button>}
+                            {can('po_approve') && <button onClick={() => act(purchaseOrdersAPI.approve, po.id, 'تم الاعتماد')} className="bg-green-600 hover:bg-green-700 text-white px-4 py-1.5 rounded text-sm">اعتماد</button>}
+                            {can('purchasing') && <button onClick={() => act(purchaseOrdersAPI.delete, po.id, 'تم الحذف')} className="bg-red-100 hover:bg-red-200 text-red-700 px-4 py-1.5 rounded text-sm">حذف</button>}
                           </>
                         )}
                         {po.status === 'submitted' && (
                           <>
-                            <button onClick={() => act(purchaseOrdersAPI.approve, po.id, 'تم الاعتماد')} className="bg-green-600 hover:bg-green-700 text-white px-4 py-1.5 rounded text-sm">اعتماد</button>
-                            <button onClick={() => act(purchaseOrdersAPI.cancel, po.id, 'تم الإلغاء')} className="bg-red-100 hover:bg-red-200 text-red-700 px-4 py-1.5 rounded text-sm">إلغاء</button>
+                            {can('po_approve') && <button onClick={() => act(purchaseOrdersAPI.approve, po.id, 'تم الاعتماد')} className="bg-green-600 hover:bg-green-700 text-white px-4 py-1.5 rounded text-sm">اعتماد</button>}
+                            {can('purchasing') && <button onClick={() => act(purchaseOrdersAPI.cancel, po.id, 'تم الإلغاء')} className="bg-red-100 hover:bg-red-200 text-red-700 px-4 py-1.5 rounded text-sm">إلغاء</button>}
                           </>
                         )}
-                        {(po.status === 'approved' || po.status === 'receiving') && (
+                        {(po.status === 'approved' || po.status === 'receiving') && can('receiving') && (
                           <button onClick={() => openReceive(po)}
                             className="bg-bayan-green hover:bg-bayan-dark text-white px-4 py-1.5 rounded text-sm">استلام بضاعة</button>
                         )}

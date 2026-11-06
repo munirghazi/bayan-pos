@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { MoneyInput } from './ui';
 import toast from 'react-hot-toast';
 import {
   HiOutlineCash, HiOutlineCreditCard, HiOutlineDeviceMobile, HiOutlineTrash,
@@ -100,10 +101,9 @@ export default function PaymentModal({ total, methods, initialMethod, requirePro
                 <div className="flex items-center gap-2">
                   <M.icon className="text-xl text-gray-500" />
                   <span className="font-medium text-gray-700 w-24">{M.label}</span>
-                  <input
-                    type="number" step="0.01" min="0" autoFocus={lines.length === 1}
+                  <MoneyInput autoFocus={lines.length === 1}
                     value={l.amount}
-                    onChange={(e) => update(l.key, { amount: e.target.value })}
+                    onChange={(v) => update(l.key, { amount: v })}
                     placeholder={l.method === 'cash' ? 'المبلغ المستلم' : 'المبلغ'}
                     className="flex-1 px-3 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none text-center text-lg"
                   />

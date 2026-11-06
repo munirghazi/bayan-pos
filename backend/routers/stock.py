@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db, Product, StockMovement, User
 from routers.auth import get_current_user, require_admin
+from perms import require_perm
 from stock import record_movement, to_base_qty
 
 router = APIRouter()
@@ -42,7 +43,7 @@ def _fmt(m: StockMovement) -> dict:
 
 @router.post("/in")
 def stock_in(req: StockIn, db: Session = Depends(get_db),
-             user: User = Depends(require_admin)):
+             user: User = Depends(require_perm("stock_adjust"))):
     if req.quantity <= 0:
         raise HTTPException(status_code=400, detail="الكمية يجب أن تكون أكبر من صفر")
     p = _product(db, req.product_id)
@@ -56,7 +57,7 @@ def stock_in(req: StockIn, db: Session = Depends(get_db),
 
 @router.post("/adjust")
 def stock_adjust(req: StockAdjust, db: Session = Depends(get_db),
-                 user: User = Depends(require_admin)):
+                 user: User = Depends(require_perm("stock_adjust"))):
     if req.new_quantity < 0:
         raise HTTPException(status_code=400, detail="الكمية لا يمكن أن تكون سالبة")
     p = _product(db, req.product_id)

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { can } from '../utils/perms';
 import { HiOutlineCube, HiOutlineArchive } from 'react-icons/hi';
 import { PageHeader, Tabs } from '../components/ui';
 import { getCapabilities } from '../utils/posSettings';
@@ -10,7 +11,7 @@ import Consignment from './Consignment';
 export default function Catalog() {
   const user = JSON.parse(localStorage.getItem('user') || '{}');
   const caps = getCapabilities();
-  const showConsign = user.role === 'admin' && caps.sales_enabled;
+  const showConsign = can('consignment') && caps.sales_enabled;
   const [tab, setTab] = useState('products');
 
   if (!showConsign) {

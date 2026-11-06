@@ -53,32 +53,38 @@ _INVOICE_REQUIRED = [
 ]
 
 
+def invoice_identity_gaps(db, tid) -> dict:
+    """What still blocks issuing invoices, split by who can fix it:
+    address  -> the tenant admin (Settings → national address)
+    platform -> the platform admin (VAT number is platform-controlled)"""
+    ts = db.execute(text(
+        "SELECT building_number, street_name, district, city, postal_code, vat_number "
+        "FROM tenant_settings WHERE tenant_id = :t"), {"t": tid}).mappings().first()
+    eff = dict(ts) if ts else {}
+    t = db.execute(text("SELECT vat_enabled, vat_number FROM tenants WHERE id = :t"), {"t": tid}).mappings().first()
+    address = [label for field, label in _INVOICE_REQUIRED[1:] if not (eff.get(field) or "").strip()]
+    platform = []
+    if t and t["vat_enabled"]:
+        # platform-controlled number first; the settings copy is the legacy fallback
+        vat = (t["vat_number"] or eff.get("vat_number") or "").strip()
+        if not vat:
+            platform.append("الرقم الضريبي غير مسجّل للمنشأة")
+        elif not re.fullmatch(r"3\d{13}3", vat):
+            platform.append("الرقم الضريبي المسجّل غير صحيح")
+    return {"address": address, "platform": platform, "ready": not address and not platform}
+
+
 def require_invoice_identity(request: Request, db: Session = Depends(get_db)) -> None:
-    """Block issuing an invoice until the seller identity + national address are complete.
-    Applies to any sales-enabled (trade/mixed) tenant. VAT number falls back to the
-    onboarding record; structured address must be set in Settings."""
+    """Block issuing an invoice until the seller identity + national address are complete."""
     tid = getattr(request.state, "tenant_id", None)
     if tid is None:
         raise HTTPException(status_code=401, detail="غير مصرح")
-    ts = db.execute(text(
-        "SELECT vat_number, building_number, street_name, district, city, postal_code "
-        "FROM tenant_settings WHERE tenant_id = :t"), {"t": tid}).mappings().first()
-    eff = dict(ts) if ts else {}
-    # the VAT number is platform-controlled (tenants); settings only as legacy fallback
-    t = db.execute(text("SELECT vat_number FROM tenants WHERE id = :t"), {"t": tid}).mappings().first()
-    if t and (t.get("vat_number") or "").strip():
-        eff["vat_number"] = t["vat_number"]
-    vat_enabled = db.execute(text("SELECT vat_enabled FROM tenants WHERE id = :t"),
-                             {"t": tid}).scalar()
-    required = _INVOICE_REQUIRED if vat_enabled else [r for r in _INVOICE_REQUIRED if r[0] != "vat_number"]
-    missing = [label for field, label in required if not (eff.get(field) or "").strip()]
-    if not missing and vat_enabled:
-        vat = (eff.get("vat_number") or "").strip()
-        if not re.fullmatch(r"3\d{13}3", vat):
-            raise HTTPException(status_code=400,
-                                detail="الرقم الضريبي غير صحيح: يجب أن يكون 15 رقماً يبدأ وينتهي بالرقم 3")
-    if missing:
-        raise HTTPException(
-            status_code=400,
-            detail="لا يمكن إصدار فاتورة قبل استكمال بيانات المنشأة والعنوان الوطني في الإعدادات: "
-                   + "، ".join(missing))
+    gaps = invoice_identity_gaps(db, tid)
+    if gaps["platform"]:
+        raise HTTPException(status_code=400, detail=(
+            "لا يمكن إصدار فاتورة: " + "، ".join(gaps["platform"])
+            + ". الرقم الضريبي تضبطه إدارة المنصة — تواصل معها لتصحيحه."))
+    if gaps["address"]:
+        raise HTTPException(status_code=400, detail=(
+            "لا يمكن إصدار فاتورة قبل استكمال العنوان الوطني في الإعدادات. الناقص: "
+            + "، ".join(gaps["address"])))

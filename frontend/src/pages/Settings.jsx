@@ -1,3 +1,4 @@
+import UserForm, { PermissionsTable } from '../components/UserForm';
 import OrgProfile from '../components/OrgProfile';
 import { useState, useEffect, useRef } from 'react';
 import { authAPI, settingsAPI, locationsAPI, apiError } from '../services/api';
@@ -578,8 +579,11 @@ export default function Settings() {
                         ? 'bg-purple-100 text-purple-700'
                         : 'bg-blue-100 text-blue-700'
                     }`}>
-                      {user.role === 'admin' ? 'مدير' : 'كاشير'}
+                      {user.role_label || user.role}
                     </span>
+                    {user.role !== 'admin' && (
+                      <p className="text-xs text-gray-400 mt-1 leading-5">{(user.permissions || []).length} صلاحيات</p>
+                    )}
                   </div>
                 </div>
 
@@ -620,102 +624,15 @@ export default function Settings() {
               </div>
             ))}
           </div>
+          <h2 className="text-lg font-bold text-gray-800 mt-8 mb-3">من يستطيع ماذا؟</h2>
+          <PermissionsTable />
         </>
       )}
 
-      {/* User Form Modal */}
+      {/* User Form (per-user permissions) */}
       {showForm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md p-6">
-            <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
-              <HiOutlineUsers className="text-bayan-green" />
-              {editingUser ? 'تعديل المستخدم' : 'إضافة مستخدم جديد'}
-            </h2>
-
-            <form onSubmit={handleSubmit} className="space-y-4">
-              {!editingUser && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">اسم المستخدم *</label>
-                  <input
-                    type="text"
-                    value={form.username}
-                    onChange={(e) => setForm({ ...form, username: e.target.value })}
-                    className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none"
-                    placeholder="اسم المستخدم (بالإنجليزية)"
-                    dir="ltr"
-                  />
-                </div>
-              )}
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">الاسم الكامل *</label>
-                <input
-                  type="text"
-                  value={form.full_name}
-                  onChange={(e) => setForm({ ...form, full_name: e.target.value })}
-                  className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none"
-                  placeholder="الاسم الكامل"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  كلمة المرور {editingUser ? '(اتركها فارغة إن لم ترد التغيير)' : '*'}
-                </label>
-                <input
-                  type="password"
-                  value={form.password}
-                  onChange={(e) => setForm({ ...form, password: e.target.value })}
-                  className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none"
-                  placeholder="كلمة المرور"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">الصلاحية</label>
-                <select
-                  value={form.role}
-                  onChange={(e) => setForm({ ...form, role: e.target.value })}
-                  className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none"
-                >
-                  <option value="cashier">كاشير (متطوع)</option>
-                  <option value="admin">مدير</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">الفرع</label>
-                <select
-                  value={form.location_id}
-                  onChange={(e) => setForm({ ...form, location_id: e.target.value })}
-                  className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none"
-                >
-                  <option value="">— كل الفروع (مدير) —</option>
-                  {locations.map((loc) => (
-                    <option key={loc.id} value={loc.id}>{loc.name}</option>
-                  ))}
-                </select>
-                <p className="text-xs text-gray-400 mt-1">الكاشير المُعيّن لفرع يبيع في صناديق فرعه فقط</p>
-              </div>
-
-              <div className="flex gap-3 pt-2">
-                <button
-                  type="submit"
-                  className="flex-1 bg-bayan-green hover:bg-bayan-dark text-white font-bold py-3 rounded-xl transition-all"
-                >
-                  {editingUser ? 'تحديث' : 'إضافة'}
-                </button>
-                <button
-                  type="button"
-                  onClick={resetForm}
-                  className="px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl transition-all"
-                >
-                  إلغاء
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <UserForm user={editingUser} locations={locations}
+          onClose={resetForm} onSaved={() => { resetForm(); loadUsers(); }} />
       )}
     </div>
   );

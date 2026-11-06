@@ -15,6 +15,9 @@ SOON = (TODAY + datetime.timedelta(days=10)).isoformat()
 PAST = (TODAY - datetime.timedelta(days=1)).isoformat()
 
 
+VALID_DOC = {"cr": "1010123456", "vat": "300000000000003", "national_address": "RRRD2929"}
+PDF_DOC = b"%PDF-1.4\n%doc\n"
+
 @pytest.fixture(scope="module")
 def client():
     with TestClient(main.app) as c:
@@ -32,8 +35,9 @@ def login(client, tenant="bayan"):
 
 def add_doc(client, h, sid, doc_type, expiry, verify=True):
     r = client.put(f"/api/suppliers/{sid}/document", headers=h,
-                   json={"doc_type": doc_type, "number": f"{doc_type}-123", "expiry_date": expiry})
+                   json={"doc_type": doc_type, "number": VALID_DOC[doc_type], "expiry_date": expiry})
     assert r.status_code == 200, r.text
+    client.post(f"/api/suppliers/{sid}/document/upload", headers=h, data={"doc_type": doc_type}, files={"file": ("d.pdf", PDF_DOC, "application/pdf")})
     if verify:
         r = client.put(f"/api/suppliers/{sid}/document/{doc_type}/verify", headers=h)
         assert r.status_code == 200, r.text
@@ -91,7 +95,7 @@ def test_expiry_breaks_and_editing_resets_verification(client):
 
     # editing a doc's metadata clears its verification (must re-verify)
     client.put(f"/api/suppliers/{sid}/document", headers=h,
-               json={"doc_type": "vat", "number": "vat-999", "expiry_date": FUTURE})
+               json={"doc_type": "vat", "number": "399999999999993", "expiry_date": FUTURE})
     comp = client.get(f"/api/suppliers/{sid}/compliance", headers=h).json()
     vat = next(d for d in comp["documents"] if d["doc_type"] == "vat")
     assert vat["is_verified"] is False and comp["is_compliant"] is False
@@ -121,3 +125,19 @@ def test_suppliers_tenant_isolation(client):
     cur.execute("SET app.current_tenant = %s", (str(other),))
     cur.execute("SELECT count(*) FROM suppliers"); assert cur.fetchone()[0] == 0
     c.close()
+
+
+def test_document_numbers_are_format_checked_and_approval_needs_a_copy(client):
+    h = login(client)
+    sid = client.post("/api/suppliers/", headers=h, json={"name": "مورّد تحقق"}).json()["id"]
+    for dt, bad in (("cr", "123"), ("vat", "123456789012345"), ("national_address", "12345678")):
+        r = client.put(f"/api/suppliers/{sid}/document", headers=h, json={"doc_type": dt, "number": bad})
+        assert r.status_code == 400, (dt, r.text)
+    ok = client.put(f"/api/suppliers/{sid}/document", headers=h, json={"doc_type": "national_address", "number": "rrrd 2929"})
+    assert ok.status_code == 200
+    # no uploaded copy yet -> cannot approve
+    r = client.put(f"/api/suppliers/{sid}/document/national_address/verify", headers=h)
+    assert r.status_code == 400 and "صورة" in r.json()["detail"]
+    future = client.put(f"/api/suppliers/{sid}/document", headers=h,
+                        json={"doc_type": "cr", "number": "1010123456", "issue_date": "2999-01-01"})
+    assert future.status_code == 400

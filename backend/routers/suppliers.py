@@ -1,3 +1,4 @@
+import re
 import os
 import shutil
 import uuid
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db, Supplier, SupplierDocument
 from routers.auth import get_current_user, require_admin, User
+from perms import require_perm
 
 router = APIRouter()
 
@@ -141,7 +143,7 @@ def list_suppliers(q: str | None = None, db: Session = Depends(get_db),
 
 @router.post("/")
 def create_supplier(req: SupplierCreate, db: Session = Depends(get_db),
-                    user: User = Depends(require_admin)):
+                    user: User = Depends(require_perm("suppliers"))):
     sup = Supplier(name=req.name, iban=req.iban, payment_terms=req.payment_terms)
     db.add(sup)
     db.commit()
@@ -160,7 +162,7 @@ def get_supplier(supplier_id: int, db: Session = Depends(get_db),
 
 @router.put("/{supplier_id}")
 def update_supplier(supplier_id: int, req: SupplierUpdate, db: Session = Depends(get_db),
-                    user: User = Depends(require_admin)):
+                    user: User = Depends(require_perm("suppliers"))):
     sup = db.query(Supplier).filter(Supplier.id == supplier_id).first()
     if not sup:
         raise HTTPException(status_code=404, detail="المورّد غير موجود")
@@ -173,7 +175,7 @@ def update_supplier(supplier_id: int, req: SupplierUpdate, db: Session = Depends
 
 @router.delete("/{supplier_id}")
 def delete_supplier(supplier_id: int, db: Session = Depends(get_db),
-                    user: User = Depends(require_admin)):
+                    user: User = Depends(require_perm("suppliers"))):
     sup = db.query(Supplier).filter(Supplier.id == supplier_id).first()
     if not sup:
         raise HTTPException(status_code=404, detail="المورّد غير موجود")
@@ -200,6 +202,27 @@ def _get_supplier(db, supplier_id) -> Supplier:
     return sup
 
 
+# Format checks only. Nothing here proves the document is real: an admin approves
+# after comparing the number with the uploaded copy (official lookup e.g. Wathq = later).
+_DOC_FORMATS = {
+    "cr": (re.compile(r"^\d{10}$"), "رقم السجل التجاري: 10 أرقام"),
+    "vat": (re.compile(r"^3\d{13}3$"), "الرقم الضريبي: 15 رقماً يبدأ وينتهي بالرقم 3"),
+    "national_address": (re.compile(r"^[A-Z]{4}\d{4}$"), "العنوان المختصر: 4 حروف إنجليزية ثم 4 أرقام (مثال: RRRD2929)"),
+}
+
+
+def _check_doc_number(doc_type: str, number: str | None) -> str | None:
+    n = (number or "").strip().replace(" ", "")
+    if not n:
+        return None
+    if doc_type == "national_address":
+        n = n.upper()
+    rule = _DOC_FORMATS.get(doc_type)
+    if rule and not rule[0].match(n):
+        raise HTTPException(status_code=400, detail=rule[1])
+    return n
+
+
 def _upsert_doc(db, sup, doc_type) -> SupplierDocument:
     if doc_type not in REQUIRED_DOCS:
         raise HTTPException(status_code=400, detail="نوع المستند غير صحيح")
@@ -214,10 +237,15 @@ def _upsert_doc(db, sup, doc_type) -> SupplierDocument:
 
 @router.put("/{supplier_id}/document")
 def upsert_document(supplier_id: int, req: DocumentUpsert, db: Session = Depends(get_db),
-                    user: User = Depends(require_admin)):
+                    user: User = Depends(require_perm("suppliers"))):
     sup = _get_supplier(db, supplier_id)
+    number = _check_doc_number(req.doc_type, req.number)
+    if req.issue_date and req.issue_date > date.today():
+        raise HTTPException(status_code=400, detail="تاريخ الإصدار لا يمكن أن يكون في المستقبل")
+    if req.issue_date and req.expiry_date and req.expiry_date <= req.issue_date:
+        raise HTTPException(status_code=400, detail="تاريخ الانتهاء يجب أن يكون بعد تاريخ الإصدار")
     doc = _upsert_doc(db, sup, req.doc_type)
-    doc.number = req.number
+    doc.number = number
     doc.issue_date = req.issue_date
     doc.expiry_date = req.expiry_date
     doc.is_verified = False  # any change requires re-verification
@@ -229,7 +257,7 @@ def upsert_document(supplier_id: int, req: DocumentUpsert, db: Session = Depends
 @router.post("/{supplier_id}/document/upload")
 async def upload_document(supplier_id: int, doc_type: str = Form(...),
                           file: UploadFile = File(...), db: Session = Depends(get_db),
-                          user: User = Depends(require_admin)):
+                          user: User = Depends(require_perm("suppliers"))):
     sup = _get_supplier(db, supplier_id)
     from upload_guard import IMAGE_OR_PDF, read_checked
     data, ext = await read_checked(file, IMAGE_OR_PDF, 10 * 1024 * 1024)
@@ -250,13 +278,18 @@ async def upload_document(supplier_id: int, doc_type: str = Form(...),
 
 @router.put("/{supplier_id}/document/{doc_type}/verify")
 def verify_document(supplier_id: int, doc_type: str, db: Session = Depends(get_db),
-                    user: User = Depends(require_admin)):
+                    user: User = Depends(require_perm("suppliers"))):
     sup = _get_supplier(db, supplier_id)
     doc = (db.query(SupplierDocument)
            .filter(SupplierDocument.supplier_id == sup.id,
                    SupplierDocument.doc_type == doc_type).first())
     if not doc:
         raise HTTPException(status_code=404, detail="المستند غير موجود")
+    # Approval = a person compared the number with the uploaded copy. Both must exist.
+    if not (doc.number or "").strip():
+        raise HTTPException(status_code=400, detail="أدخل رقم المستند قبل الاعتماد")
+    if not doc.file_url:
+        raise HTTPException(status_code=400, detail="ارفع صورة المستند قبل الاعتماد")
     doc.is_verified = True
     db.commit()
     db.refresh(sup)
@@ -265,7 +298,7 @@ def verify_document(supplier_id: int, doc_type: str, db: Session = Depends(get_d
 
 @router.delete("/{supplier_id}/document/{doc_type}")
 def delete_document(supplier_id: int, doc_type: str, db: Session = Depends(get_db),
-                    user: User = Depends(require_admin)):
+                    user: User = Depends(require_perm("suppliers"))):
     sup = _get_supplier(db, supplier_id)
     doc = (db.query(SupplierDocument)
            .filter(SupplierDocument.supplier_id == sup.id,

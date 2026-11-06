@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
+import { MoneyInput } from '../components/ui';
+import { can, canOpen } from '../utils/perms';
 import { productsAPI, salesAPI, donationsAPI, registersAPI, customersAPI, settingsAPI, consignmentAPI, apiError } from '../services/api';
 import { Link } from 'react-router-dom';
 import { COUNTRIES, flagOf, validateLocalPhone } from '../utils/countries';
@@ -50,6 +52,8 @@ export default function POS() {
   const [lastSale, setLastSale] = useState(null);
   const [showReceipt, setShowReceipt] = useState(false);
   const [showDonation, setShowDonation] = useState(false);
+  const [qtyNext, setQtyNext] = useState('1');                 // quantity for the next product added
+  const [view, setView] = useState(() => { try { return localStorage.getItem('pos_view') || ''; } catch (e) { return ''; } });
   const [donationMethod, setDonationMethod] = useState('');
   const [donationAmount, setDonationAmount] = useState('');
   const [donorName, setDonorName] = useState('');
@@ -83,9 +87,9 @@ export default function POS() {
     if (!caps.sales_enabled) return;
     settingsAPI.getTenant().then(({ data }) => {
       setRequireProof(data.require_transfer_proof !== false);
-      const required = ['building_number', 'street_name', 'district', 'city', 'postal_code'];
-      const missing = required.some((k) => !data[k] || String(data[k]).trim() === '');
-      setAddrIncomplete(missing);
+      // the server says exactly what blocks invoicing, and who can fix it
+      const g = data.invoice_gaps || { address: [], platform: [] };
+      setAddrIncomplete(g.address.length || g.platform.length ? g : false);
     }).catch(() => {});
   }, []);
 
@@ -205,6 +209,8 @@ export default function POS() {
     );
   })();
 
+  const effectiveView = view || (products.length > 24 ? 'list' : 'grid');
+
   const renderProductCard = (product) => (
     <button
       key={product.id}
@@ -231,6 +237,21 @@ export default function POS() {
     </button>
   );
 
+  const renderProductRow = (product) => (
+    <button key={product.id} onClick={() => addToCart(product)}
+      className="w-full flex items-center gap-3 bg-white border border-gray-200 rounded-lg px-3 py-2 hover:border-bayan-green hover:bg-bayan-light/20 transition-all text-right">
+      <span className="flex-1 min-w-0">
+        <span className="block font-medium text-gray-800 truncate">{product.name}</span>
+        <span className="block text-xs text-gray-400">
+          {product.barcode ? <span dir="ltr">{product.barcode}</span> : null}
+          {product.__consign ? ` · أمانة ${product.__consign.consignor_name || ''}` : ''}
+        </span>
+      </span>
+      <span className="text-xs text-gray-400 whitespace-nowrap">المتبقي {product.stock}</span>
+      <span className="text-bayan-green font-bold whitespace-nowrap w-24 text-left">{(product.price || 0).toFixed(2)} <SarIcon size={13} /></span>
+    </button>
+  );
+
   const buildLine = (product) => {
     const availBase = product.available_stock != null ? product.available_stock : product.stock;
     let uom_id = null, unit_name = '', maxSell = availBase, price = product.price;
@@ -253,27 +274,35 @@ export default function POS() {
     };
   };
 
-  const addToCart = (product) => {
+  const addToCart = (product, qtyOverride) => {
     if (product.__consign) { addConsignedLot(product.__consign); return; }
+    const q = qtyOverride ?? (parseFloat(qtyNext) > 0 ? parseFloat(qtyNext) : 1);
     const k = 'p' + product.id;
     const existing = cart.find((item) => item.key === k);
-    if (existing) {
-      if (existing.quantity + 1 > existing.max_stock) {
-        toast.error('الكمية المطلوبة غير متوفرة');
-        return;
-      }
-      setCart(cart.map((item) =>
-        item.key === k ? { ...item, quantity: item.quantity + 1 } : item
-      ));
-    } else {
-      setCart([...cart, buildLine(product)]);
+    const line = existing || buildLine(product);
+    if ((existing ? existing.quantity : 0) + q > line.max_stock) {
+      toast.error(`الكمية المطلوبة غير متوفرة (المتاح ${line.max_stock})`);
+      return;
     }
+    if (existing) {
+      setCart(cart.map((item) => (item.key === k ? { ...item, quantity: item.quantity + q } : item)));
+    } else {
+      setCart([...cart, { ...line, quantity: q }]);
+    }
+    setQtyNext('1');
   };
 
   const handleSearchKey = async (e) => {
     if (e.key !== 'Enter') return;
-    const code = search.trim();
+    let code = search.trim();
     if (!code) return;
+    // "3*6281234567890" or "3×…" → add 3 of that product
+    const m = code.match(/^(\d+(?:\.\d+)?)\s*[*×xX]\s*(.+)$/);
+    if (m) {
+      const p = products.find((x) => x.barcode === m[2].trim() || x.name === m[2].trim());
+      if (p) { addToCart(p, parseFloat(m[1])); setSearch(''); return; }
+      code = m[2].trim();
+    }
     // already visible in the grid? add the single match
     if (filteredProducts.length === 1) { addToCart(filteredProducts[0]); setSearch(''); return; }
     // otherwise try a consigned barcode lookup (scan-to-sell)
@@ -335,7 +364,12 @@ export default function POS() {
   const resetAfterSale = () => {
     setShowPayment(false);
     setCart([]);
+    // a new sale starts with an empty customer box (tester: name stayed on screen)
     setSelectedCustomer(null);
+    setCustomerQuery('');
+    setCustomerResults([]);
+    setShowNewCustomer(false);
+    setNewCustomer({ name: '', phone: '' });
     loadProducts();
     loadConsignLots();
     loadDraftCount();
@@ -460,13 +494,14 @@ export default function POS() {
       {addrIncomplete && !addrBannerDismissed && (
         <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl px-4 py-3 text-sm">
           <span className="flex-1">
-            لإصدار الفواتير الضريبية يجب إكمال بيانات <strong>العنوان الوطني</strong> في الإعدادات.
+            {addrIncomplete.address?.length > 0 && <>لإصدار الفواتير أكمل في <strong>العنوان الوطني</strong>: {addrIncomplete.address.join('، ')}. </>}
+            {addrIncomplete.platform?.length > 0 && <>{addrIncomplete.platform.join('، ')} — يضبطه فريق إدارة المنصة، تواصل معهم.</>}
           </span>
-          <Link to="/settings" className="font-medium underline hover:text-amber-900">فتح الإعدادات</Link>
+          {addrIncomplete.address?.length > 0 && canOpen('/settings') && <Link to="/settings" className="font-medium underline hover:text-amber-900">فتح الإعدادات</Link>}
           <button onClick={() => setAddrBannerDismissed(true)} className="text-amber-500 hover:text-amber-700 px-1">✕</button>
         </div>
       )}
-      <div className="flex gap-4 flex-1 min-h-0">
+      <div className="flex flex-col lg:flex-row gap-4 flex-1 min-h-0">
       {/* Products Grid */}
       <div className="flex-1 flex flex-col">
         {/* Search + Donation button */}
@@ -478,9 +513,22 @@ export default function POS() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               onKeyDown={handleSearchKey}
-              placeholder="ابحث أو امسح باركود..."
+              placeholder="ابحث أو امسح باركود... (مثال: 3*باركود لإضافة 3)"
               className="w-full pr-10 pl-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-bayan-green focus:border-transparent outline-none"
             />
+          </div>
+          <label className="flex items-center gap-1 bg-white border border-gray-200 rounded-xl px-2" title="الكمية التي تُضاف عند الضغط على المنتج التالي">
+            <span className="text-sm text-gray-500 whitespace-nowrap">الكمية ×</span>
+            <input type="number" min="0" step="any" inputMode="decimal" value={qtyNext}
+              onChange={(e) => setQtyNext(e.target.value)} onFocus={(e) => e.target.select()}
+              className={`w-14 py-2 text-center text-lg font-bold outline-none rounded-lg ${qtyNext !== '1' ? 'bg-amber-100 text-amber-800' : ''}`} />
+          </label>
+          <div className="hidden sm:flex bg-gray-100 rounded-xl p-1" title="طريقة العرض">
+            {[['grid', '▦'], ['list', '☰']].map(([v, icon]) => (
+              <button key={v} onClick={() => { setView(v); try { localStorage.setItem('pos_view', v); } catch (e) {} }}
+                className={`px-3 rounded-lg text-lg ${effectiveView === v ? 'bg-white shadow text-bayan-green' : 'text-gray-500'}`}
+                aria-label={v === 'grid' ? 'عرض بطاقات' : 'عرض قائمة'}>{icon}</button>
+            ))}
           </div>
           {draftCount > 0 && (
             <button
@@ -492,7 +540,7 @@ export default function POS() {
               <span className="bg-white text-amber-600 rounded-full px-2 text-sm font-bold">{draftCount}</span>
             </button>
           )}
-          {posSettings.showDonation && caps.donations_enabled && donationPaymentMethods.length > 0 && (
+          {posSettings.showDonation && caps.donations_enabled && can('donate') && donationPaymentMethods.length > 0 && (
             <button
               onClick={openDonation}
               disabled={cart.length > 0}
@@ -520,9 +568,11 @@ export default function POS() {
                   <span className="text-sm font-medium text-bayan-green bg-bayan-light px-2.5 py-0.5 rounded-full">{items.length}</span>
                   <div className="flex-1 h-px bg-gray-200" />
                 </div>
-                <div className="pos-grid">
-                  {items.map((product) => renderProductCard(product))}
-                </div>
+                {effectiveView === 'list' ? (
+                  <div className="space-y-1.5">{items.map((product) => renderProductRow(product))}</div>
+                ) : (
+                  <div className="pos-grid">{items.map((product) => renderProductCard(product))}</div>
+                )}
               </section>
             ))
           )}
@@ -530,7 +580,7 @@ export default function POS() {
       </div>
 
       {/* Cart / Checkout */}
-      <div className="w-80 xl:w-96 shrink-0 bg-white rounded-2xl shadow-lg border flex flex-col">
+      <div className="w-full lg:w-80 xl:w-96 shrink-0 bg-white rounded-2xl shadow-lg border flex flex-col max-h-[70vh] lg:max-h-none">
         <div className="pos-cart-section p-4 border-b">
           <h2 className="text-lg font-bold text-gray-800">🛒 سلة المشتريات</h2>
         </div>
@@ -563,7 +613,8 @@ export default function POS() {
                     min="0"
                     value={item.quantity}
                     onChange={(e) => setQuantity(item.key, e.target.value)}
-                    className="w-14 text-center font-bold text-sm rounded border border-gray-200 py-1 outline-none focus:ring-1 focus:ring-bayan-green"
+                    onFocus={(e) => e.target.select()} inputMode="decimal"
+                    className="w-16 text-center font-bold text-base rounded-lg border border-gray-300 py-1.5 outline-none focus:ring-2 focus:ring-bayan-green"
                   />
                   {item.unit_name && <span className="text-xs text-gray-400 min-w-[2.5rem]">{item.unit_name}</span>}
                   <button
@@ -739,10 +790,9 @@ export default function POS() {
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">مبلغ التبرع (<SarIcon size={12} />) *</label>
-                <input
-                  type="number"
+                <MoneyInput
                   value={donationAmount}
-                  onChange={(e) => setDonationAmount(e.target.value)}
+                  onChange={(v) => setDonationAmount(v)}
                   className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-purple-500 outline-none text-center text-xl"
                   placeholder="0.00"
                   autoFocus

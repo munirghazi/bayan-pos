@@ -20,6 +20,7 @@ import invoicing as inv
 from capabilities import require_donations
 from database import get_db, Donation
 from routers.auth import get_current_user, require_admin, User
+from perms import require_perm
 from routers.sales import _check_payment
 from tenant_audit import tenant_audit
 
@@ -66,7 +67,7 @@ class DonationResponse(BaseModel):
 
 # ===================== Routes =====================
 
-@router.post("/", response_model=DonationResponse)
+@router.post("/", response_model=DonationResponse, dependencies=[Depends(require_perm("donate"))])
 def create_donation(request: DonationCreate, db: Session = Depends(get_db),
                     current_user: User = Depends(get_current_user),
                     _caps: dict = Depends(require_donations),
@@ -151,7 +152,7 @@ def get_donation(donation_id: int, db: Session = Depends(get_db),
 
 @router.post("/{donation_id}/void", response_model=DonationResponse)
 def void_donation(donation_id: int, req: DonationVoid, db: Session = Depends(get_db),
-                  user: User = Depends(require_admin),
+                  user: User = Depends(require_perm("void_donations")),
                   _caps: dict = Depends(require_donations)):
     reason = (req.reason or "").strip()
     if not reason:

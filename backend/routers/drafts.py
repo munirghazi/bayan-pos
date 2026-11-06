@@ -22,6 +22,7 @@ import payments as pay
 from capabilities import require_sales, require_donations, require_invoice_identity
 from database import get_db, PosDraft, Customer
 from routers.auth import get_current_user, User
+from perms import require_perm
 
 router = APIRouter()
 KSA = ZoneInfo("Asia/Riyadh")
@@ -70,7 +71,7 @@ def _fmt(d: PosDraft) -> dict:
 
 # ---------------------------------------------------------------- sale drafts
 
-@router.post("/sale")
+@router.post("/sale", dependencies=[Depends(require_perm("sell"))])
 def create_sale_draft(request: dict, db: Session = Depends(get_db),
                       user: User = Depends(get_current_user),
                       _caps: dict = Depends(require_sales),
@@ -106,7 +107,7 @@ def list_drafts(status: str = "open", kind: str | None = None, db: Session = Dep
     return [_fmt(d) for d in q.order_by(PosDraft.created_at.desc()).limit(200).all()]
 
 
-@router.post("/{draft_id}/issue")
+@router.post("/{draft_id}/issue", dependencies=[Depends(require_perm("sell", "donate"))])
 def issue_draft(draft_id: int, body: IssueIn, db: Session = Depends(get_db),
                 user: User = Depends(get_current_user)):
     d = _get_open(db, draft_id)
@@ -134,7 +135,7 @@ def issue_draft(draft_id: int, body: IssueIn, db: Session = Depends(get_db),
     return {"draft": _fmt(d), "donation": _format_donation(db, don)}
 
 
-@router.post("/{draft_id}/cancel")
+@router.post("/{draft_id}/cancel", dependencies=[Depends(require_perm("sell", "donate"))])
 def cancel_draft(draft_id: int, body: CancelIn, db: Session = Depends(get_db),
                  user: User = Depends(get_current_user)):
     d = _get_open(db, draft_id)
@@ -146,7 +147,7 @@ def cancel_draft(draft_id: int, body: CancelIn, db: Session = Depends(get_db),
 
 # ---------------------------------------------------------------- donation drafts
 
-@router.post("/donation")
+@router.post("/donation", dependencies=[Depends(require_perm("donate"))])
 def create_donation_draft(request: dict, db: Session = Depends(get_db),
                           user: User = Depends(get_current_user),
                           _caps: dict = Depends(require_donations)):

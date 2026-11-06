@@ -145,6 +145,7 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     must_change_password = Column(Boolean, default=False, nullable=False)
     tokens_valid_after = Column(DateTime(timezone=True), nullable=True)   # sessions before this are ended
+    permissions = Column(JSONB, nullable=True)        # list of perms.py keys; NULL for admin
     created_at = Column(DateTime, default=datetime.utcnow)
 
     sales = relationship("Sale", back_populates="user")

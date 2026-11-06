@@ -17,6 +17,7 @@ import invoicing as inv
 from capabilities import get_tenant_caps, require_donations
 from database import get_db, Sale, Donation, Product, Return
 from routers.auth import get_current_user, User
+from perms import require_perm
 
 router = APIRouter()
 KSA = ZoneInfo("Asia/Riyadh")
@@ -42,7 +43,7 @@ def _f(x) -> float:
 
 # ===================== Dashboard =====================
 
-@router.get("/dashboard")
+@router.get("/dashboard", dependencies=[Depends(require_perm("reports"))])
 def get_dashboard(db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
                   caps: dict = Depends(get_tenant_caps)):
     t0, t1 = _day_bounds_utc(datetime.now(KSA).date())
@@ -101,7 +102,7 @@ def get_dashboard(db: Session = Depends(get_db), current_user: User = Depends(ge
 
 # ===================== Sales report =====================
 
-@router.get("/sales-report")
+@router.get("/sales-report", dependencies=[Depends(require_perm("reports"))])
 def get_sales_report(
     start_date: str = Query(None, description="YYYY-MM-DD (Riyadh)"),
     end_date: str = Query(None, description="YYYY-MM-DD (Riyadh)"),
@@ -198,7 +199,7 @@ def get_sales_report(
 
 # ===================== Donations report =====================
 
-@router.get("/donations-report")
+@router.get("/donations-report", dependencies=[Depends(require_perm("reports"))])
 def get_donations_report(
     start_date: str = Query(None, description="YYYY-MM-DD (Riyadh)"),
     end_date: str = Query(None, description="YYYY-MM-DD (Riyadh)"),

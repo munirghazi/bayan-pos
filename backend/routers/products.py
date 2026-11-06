@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from database import get_db, Product, Category, KitComponent, Uom
 from routers.auth import get_current_user, require_admin, User
+from perms import require_perm
 from kits import available_quantity, reachable, components_of
 import os
 import shutil
@@ -161,7 +162,7 @@ class EnsureBarcodes(BaseModel):
 
 @router.post("/ensure-barcodes")
 def ensure_barcodes(req: EnsureBarcodes, db: Session = Depends(get_db),
-                    current_user: User = Depends(require_admin)):
+                    current_user: User = Depends(require_perm("products"))):
     """Ensure each product has a barcode (generate + save PR######## when empty).
     Returns id/name/barcode/price for label printing."""
     out = []
@@ -221,7 +222,7 @@ def get_categories(db: Session = Depends(get_db), current_user: User = Depends(g
 
 
 @router.post("/categories", response_model=CategoryResponse)
-def create_category(request: CategoryCreate, db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
+def create_category(request: CategoryCreate, db: Session = Depends(get_db), current_user: User = Depends(require_perm("products"))):
     category = Category(name=request.name)
     db.add(category)
     db.commit()
@@ -230,7 +231,7 @@ def create_category(request: CategoryCreate, db: Session = Depends(get_db), curr
 
 
 @router.put("/categories/{category_id}", response_model=CategoryResponse)
-def update_category(category_id: int, request: CategoryCreate, db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
+def update_category(category_id: int, request: CategoryCreate, db: Session = Depends(get_db), current_user: User = Depends(require_perm("products"))):
     category = db.query(Category).filter(Category.id == category_id).first()
     if not category:
         raise HTTPException(status_code=404, detail="التصنيف غير موجود")
@@ -241,7 +242,7 @@ def update_category(category_id: int, request: CategoryCreate, db: Session = Dep
 
 
 @router.delete("/categories/{category_id}")
-def delete_category(category_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
+def delete_category(category_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_perm("products"))):
     category = db.query(Category).filter(Category.id == category_id).first()
     if not category:
         raise HTTPException(status_code=404, detail="التصنيف غير موجود")
@@ -259,7 +260,7 @@ def get_products(db: Session = Depends(get_db), current_user: User = Depends(get
 
 @router.get("/all", response_model=list[ProductResponse])
 def get_all_products(include_inactive: bool = False, db: Session = Depends(get_db),
-                     current_user: User = Depends(require_admin)):
+                     current_user: User = Depends(require_perm("products"))):
     q = db.query(Product).filter(Product.is_consignment == False)
     if not include_inactive:
         q = q.filter(Product.is_active == True)  # noqa: E712
@@ -275,7 +276,7 @@ def get_product(product_id: int, db: Session = Depends(get_db), current_user: Us
 
 
 @router.post("/", response_model=ProductResponse)
-def create_product(request: ProductCreate, db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
+def create_product(request: ProductCreate, db: Session = Depends(get_db), current_user: User = Depends(require_perm("products"))):
     if request.is_kit and not request.components:
         raise HTTPException(status_code=400, detail="المنتج المُجمّع (kit) يجب أن يحتوي على مكوّن واحد على الأقل")
 
@@ -310,7 +311,7 @@ def create_product(request: ProductCreate, db: Session = Depends(get_db), curren
 
 
 @router.put("/{product_id}", response_model=ProductResponse)
-def update_product(product_id: int, request: ProductUpdate, db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
+def update_product(product_id: int, request: ProductUpdate, db: Session = Depends(get_db), current_user: User = Depends(require_perm("products"))):
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="المنتج غير موجود")
@@ -368,7 +369,7 @@ def update_product(product_id: int, request: ProductUpdate, db: Session = Depend
 
 
 @router.delete("/{product_id}")
-def delete_product(product_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
+def delete_product(product_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_perm("products"))):
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="المنتج غير موجود")
@@ -378,7 +379,7 @@ def delete_product(product_id: int, db: Session = Depends(get_db), current_user:
 
 
 @router.post("/upload-image")
-async def upload_image(file: UploadFile = File(...), current_user: User = Depends(require_admin)):
+async def upload_image(file: UploadFile = File(...), current_user: User = Depends(require_perm("products"))):
     from upload_guard import IMAGE, read_checked
     data, ext = await read_checked(file, IMAGE, 5 * 1024 * 1024)
 
@@ -392,7 +393,7 @@ async def upload_image(file: UploadFile = File(...), current_user: User = Depend
 
 
 @router.put("/{product_id}/stock")
-def update_stock(product_id: int, quantity: float, db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
+def update_stock(product_id: int, quantity: float, db: Session = Depends(get_db), current_user: User = Depends(require_perm("stock_adjust"))):
     # Security test AUTH-12: admin only, and recorded in the stock ledger like /stock/adjust.
     from stock import record_movement
     product = db.query(Product).filter(Product.id == product_id).first()

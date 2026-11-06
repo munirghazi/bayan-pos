@@ -1,10 +1,17 @@
 import { useState, useEffect, useRef } from 'react';
+import { can } from '../utils/perms';
 import { suppliersAPI, apiError } from '../services/api';
 import toast from 'react-hot-toast';
 import {
   HiOutlineTruck, HiOutlinePlus, HiOutlineTrash, HiOutlineCheckCircle,
   HiOutlineExclamationCircle, HiOutlineUpload, HiOutlineDocumentText,
 } from 'react-icons/hi';
+
+const DOC_HINT = {
+  cr: { ph: '1010123456', rule: 'الرقم: 10 أرقام' },
+  vat: { ph: '300000000000003', rule: 'الرقم: 15 رقماً يبدأ وينتهي بـ 3' },
+  national_address: { ph: 'RRRD2929', rule: 'العنوان المختصر: 4 حروف ثم 4 أرقام' },
+};
 
 const DOC_TYPES = [
   { key: 'cr', label: 'السجل التجاري' },
@@ -17,6 +24,8 @@ export default function Suppliers() {
   const [newSupplier, setNewSupplier] = useState({ name: '', iban: '', payment_terms: '' });
   const [selected, setSelected] = useState(null); // detail w/ compliance
   const [docForms, setDocForms] = useState({});   // doc_type -> { number, expiry_date }
+  const [savedAt, setSavedAt] = useState({});     // doc_type -> 'تم حفظ …' (clear confirmation)
+  const editable = can('suppliers');
   const submittingRef = useRef(false);
 
   useEffect(() => { load(); }, []);
@@ -60,7 +69,7 @@ export default function Suppliers() {
         iban: newSupplier.iban.trim() || null,
         payment_terms: newSupplier.payment_terms.trim() || null,
       });
-      toast.success('تم إضافة المورّد');
+      toast.success(`تمت إضافة المورّد «${newSupplier.name.trim()}» — أكمل مستنداته في اللوحة المجاورة`);
       setNewSupplier({ name: '', iban: '', payment_terms: '' });
       await load();
       refreshSelected(res.data);
@@ -86,7 +95,8 @@ export default function Suppliers() {
         number: form.number || null,
         expiry_date: form.expiry_date || null,
       });
-      toast.success('تم حفظ بيانات المستند (بانتظار التحقّق)');
+      toast.success('تم حفظ بيانات المستند');
+      setSavedAt({ ...savedAt, [docType]: '✓ تم حفظ الرقم والتاريخ' });
       refreshSelected(res.data);
     } catch (err) { toast.error(apiError(err, 'خطأ في الحفظ')); }
   };
@@ -95,7 +105,8 @@ export default function Suppliers() {
     if (!file) return;
     try {
       const res = await suppliersAPI.uploadDoc(selected.id, docType, file);
-      toast.success('تم رفع الملف (بانتظار التحقّق)');
+      toast.success('تم رفع صورة المستند');
+      setSavedAt({ ...savedAt, [docType]: '✓ تم رفع صورة المستند' });
       refreshSelected(res.data);
     } catch (err) { toast.error(apiError(err, 'خطأ في الرفع')); }
   };
@@ -103,17 +114,18 @@ export default function Suppliers() {
   const verifyDoc = async (docType) => {
     try {
       const res = await suppliersAPI.verifyDoc(selected.id, docType);
-      toast.success('تم التحقّق من المستند');
+      toast.success('تم اعتماد المستند');
+      setSavedAt({ ...savedAt, [docType]: '✓ تم الاعتماد' });
       refreshSelected(res.data);
     } catch (err) { toast.error(apiError(err, 'خطأ')); }
   };
 
   const docStatus = (d) => {
-    if (!d.present) return { text: 'غير مرفوع', cls: 'bg-gray-100 text-gray-500' };
+    if (!d.present) return { text: 'لم يُدخل', cls: 'bg-gray-100 text-gray-500' };
     if (d.expired) return { text: 'منتهي', cls: 'bg-red-100 text-red-700' };
-    if (!d.is_verified) return { text: 'بانتظار التحقّق', cls: 'bg-yellow-100 text-yellow-700' };
+    if (!d.is_verified) return { text: 'بانتظار الاعتماد', cls: 'bg-yellow-100 text-yellow-700' };
     if (d.expiring_soon) return { text: 'قارب على الانتهاء', cls: 'bg-orange-100 text-orange-700' };
-    return { text: 'موثّق', cls: 'bg-green-100 text-green-700' };
+    return { text: 'معتمد', cls: 'bg-green-100 text-green-700' };
   };
 
   return (
@@ -122,11 +134,11 @@ export default function Suppliers() {
         <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
           <HiOutlineTruck className="text-bayan-green" /> الموردون
         </h1>
-        <p className="text-gray-500 mt-1">إدارة الموردين والتحقّق من المستندات (السجل التجاري، الضريبة، العنوان الوطني)</p>
+        <p className="text-gray-500 mt-1">يُعتمد المورّد بعد إدخال مستنداته الثلاثة (السجل التجاري، الشهادة الضريبية، العنوان الوطني) ورفع صورها ومطابقتها. أوامر الشراء للموردين المعتمدين فقط.</p>
       </div>
 
       {/* Add supplier */}
-      <div className="bg-white rounded-xl border shadow-sm p-4 grid grid-cols-1 md:grid-cols-4 gap-3">
+      {editable && <div className="bg-white rounded-xl border shadow-sm p-4 grid grid-cols-1 md:grid-cols-4 gap-3">
         <input value={newSupplier.name} onChange={(e) => setNewSupplier({ ...newSupplier, name: e.target.value })}
           placeholder="اسم المورّد" className="px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green outline-none text-right" />
         <input value={newSupplier.iban} onChange={(e) => setNewSupplier({ ...newSupplier, iban: e.target.value })}
@@ -137,7 +149,7 @@ export default function Suppliers() {
           className="flex items-center justify-center gap-2 bg-bayan-green hover:bg-bayan-dark text-white px-6 py-2 rounded-lg transition-all">
           <HiOutlinePlus /> إضافة
         </button>
-      </div>
+      </div>}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Supplier list */}
@@ -159,11 +171,11 @@ export default function Suppliers() {
                   </div>
                   <div className="flex items-center gap-3">
                     <span className={`text-xs px-2 py-0.5 rounded-full ${s.is_compliant ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                      {s.is_compliant ? 'متوافق' : 'غير متوافق'}
+                      {s.is_compliant ? 'معتمد' : 'غير معتمد'}
                     </span>
-                    <button onClick={(e) => { e.stopPropagation(); deactivate(s.id); }} className="text-red-400 hover:text-red-600">
+                    {editable && <button onClick={(e) => { e.stopPropagation(); deactivate(s.id); }} className="text-red-400 hover:text-red-600" title="تعطيل المورّد">
                       <HiOutlineTrash />
-                    </button>
+                    </button>}
                   </div>
                 </div>
               ))}
@@ -174,7 +186,12 @@ export default function Suppliers() {
         {/* Documents panel */}
         <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
           <div className="px-4 py-3 bg-gray-50 border-b font-bold text-gray-800">
-            {selected ? `مستندات: ${selected.name}` : 'اختر مورّداً لإدارة مستنداته'}
+            {selected ? (
+              <span className="flex items-center justify-between">
+                <span>مستندات: {selected.name}</span>
+                <button onClick={() => { setSelected(null); setSavedAt({}); }} className="text-sm font-normal bg-white border border-gray-300 hover:bg-gray-100 rounded-lg px-3 py-1">رجوع للقائمة</button>
+              </span>
+            ) : 'اختر مورّداً من القائمة لإدارة مستنداته'}
           </div>
           {selected && (
             <div className="p-4 space-y-4">
@@ -190,12 +207,14 @@ export default function Suppliers() {
                     <div className="grid grid-cols-2 gap-2">
                       <input value={form.number}
                         onChange={(e) => setDocForms({ ...docForms, [d.doc_type]: { ...form, number: e.target.value } })}
-                        placeholder="رقم المستند" className="px-3 py-2 rounded border border-gray-300 outline-none text-sm text-right" />
-                      <input type="date" value={form.expiry_date || ''}
+                        placeholder={`مثال ${DOC_HINT[d.doc_type]?.ph || ''}`} dir="ltr" disabled={!editable}
+                        className="px-3 py-2 rounded border border-gray-300 outline-none text-sm text-left font-mono" />
+                      <input type="date" value={form.expiry_date || ''} disabled={!editable} title="تاريخ الانتهاء"
                         onChange={(e) => setDocForms({ ...docForms, [d.doc_type]: { ...form, expiry_date: e.target.value } })}
                         className="px-3 py-2 rounded border border-gray-300 outline-none text-sm" dir="ltr" />
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-xs text-gray-400 -mt-2">{DOC_HINT[d.doc_type]?.rule} · تاريخ الانتهاء (يساراً) للتنبيه قبل انتهائه</p>
+                    {editable && <div className="flex flex-wrap items-center gap-2">
                       <button onClick={() => saveDoc(d.doc_type)}
                         className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded text-sm">حفظ البيانات</button>
                       <label className="flex items-center gap-1 bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded text-sm cursor-pointer">
@@ -210,19 +229,32 @@ export default function Suppliers() {
                         </a>
                       )}
                       {d.present && !d.is_verified && (
-                        <button onClick={() => verifyDoc(d.doc_type)}
-                          className="bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded text-sm mr-auto">تحقّق</button>
+                        <button onClick={() => verifyDoc(d.doc_type)} disabled={!d.number || !d.file_url}
+                          title={!d.number || !d.file_url ? 'أدخل الرقم وارفع صورة المستند أولاً' : 'طابقت الرقم مع صورة المستند'}
+                          className="bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded text-sm mr-auto disabled:opacity-40">اعتماد</button>
                       )}
-                    </div>
+                    </div>}
+                    {(() => {
+                      const need = [!d.number && 'الرقم', !d.file_url && 'صورة المستند', d.present && d.number && d.file_url && !d.is_verified && 'الاعتماد'].filter(Boolean);
+                      return (
+                        <p className={`text-xs ${savedAt[d.doc_type] ? 'text-emerald-700' : 'text-gray-500'}`}>
+                          {savedAt[d.doc_type] || (d.is_verified && !d.expired ? 'مكتمل' : need.length ? `المتبقي: ${need.join('، ')}` : '')}
+                        </p>
+                      );
+                    })()}
                   </div>
                 );
               })}
 
               <div className={`rounded-lg p-3 text-sm font-medium ${selected.compliance.is_compliant ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
                 {selected.compliance.is_compliant
-                  ? '✓ هذا المورّد متوافق ويمكن إصدار أوامر شراء له'
-                  : '✗ هذا المورّد غير متوافق — لا يمكن إصدار أوامر شراء حتى تكتمل المستندات وتُوثّق'}
+                  ? '✓ هذا المورّد معتمد ويمكن إصدار أوامر شراء له'
+                  : '✗ هذا المورّد غير معتمد — لا يمكن إصدار أوامر شراء له حتى تكتمل مستنداته الثلاثة وتُعتمد'}
               </div>
+              <p className="text-xs text-gray-500 leading-6">
+                «اعتماد» يعني أنك طابقت الرقم مع صورة المستند. النظام يتحقق من <b>صيغة</b> الأرقام فقط (عدد الخانات وبدايتها)،
+                ولا يتحقق من صحتها لدى وزارة التجارة أو هيئة الزكاة — الربط الرسمي (واثق) متاح لاحقاً كخدمة إضافية.
+              </p>
             </div>
           )}
         </div>

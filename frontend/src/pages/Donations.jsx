@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
+import { MoneyInput } from '../components/ui';
+import { can } from '../utils/perms';
 import { donationsAPI, draftsAPI, settingsAPI, apiError } from '../services/api';
 import { uploadProof, openProof } from '../utils/proofs';
 import { getPOSSettings } from '../utils/posSettings';
@@ -34,7 +36,7 @@ const DONATION_METHODS = [
 
 export default function Donations() {
   const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
-  const isAdmin = currentUser.role === 'admin';
+  const isAdmin = can('void_donations');   // permission to void receipts
   const enabled = getPOSSettings().paymentMethods || {};
   const methods = DONATION_METHODS.filter((m) => enabled[m.key] !== false);
   const [donations, setDonations] = useState([]);
@@ -260,11 +262,9 @@ export default function Donations() {
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">مبلغ التبرع (<SarIcon size={12} />) *</label>
-                <input
-                  type="number"
-                  step="0.01"
+                <MoneyInput
                   value={form.amount}
-                  onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                  onChange={(v) => setForm({ ...form, amount: v })}
                   className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-purple-500 outline-none text-center text-xl"
                   placeholder="0.00"
                   autoFocus

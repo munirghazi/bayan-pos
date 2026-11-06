@@ -18,6 +18,7 @@ import invoicing as inv
 from config import settings
 from database import get_db, PaymentProof
 from routers.auth import get_current_user, User
+from perms import require_perm
 
 router = APIRouter()
 
@@ -49,7 +50,7 @@ def _fmt(p: PaymentProof) -> dict:
             "created_at": inv.iso_z(p.created_at)}
 
 
-@router.post("/")
+@router.post("/", dependencies=[Depends(require_perm("sell", "donate"))])
 async def upload_proof(request: Request, file: UploadFile = File(...),
                        db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     tid = getattr(request.state, "tenant_id", None)

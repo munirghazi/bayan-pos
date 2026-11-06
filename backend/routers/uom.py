@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db, UomCategory, Uom
 from routers.auth import get_current_user, require_admin, User
+from perms import require_perm
 from uoms import convert, UomConversionError
 
 router = APIRouter()
@@ -57,7 +58,7 @@ def list_categories(db: Session = Depends(get_db), user: User = Depends(get_curr
 
 @router.post("/categories")
 def create_category(req: CategoryCreate, db: Session = Depends(get_db),
-                    user: User = Depends(require_admin)):
+                    user: User = Depends(require_perm("products"))):
     c = UomCategory(name=req.name, decimal_places=req.decimal_places)
     db.add(c); db.commit(); db.refresh(c)
     return _cat(c)
@@ -65,7 +66,7 @@ def create_category(req: CategoryCreate, db: Session = Depends(get_db),
 
 @router.put("/categories/{cat_id}")
 def update_category(cat_id: int, req: CategoryUpdate, db: Session = Depends(get_db),
-                    user: User = Depends(require_admin)):
+                    user: User = Depends(require_perm("products"))):
     c = db.query(UomCategory).filter(UomCategory.id == cat_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="الفئة غير موجودة")
@@ -77,7 +78,7 @@ def update_category(cat_id: int, req: CategoryUpdate, db: Session = Depends(get_
 
 @router.delete("/categories/{cat_id}")
 def delete_category(cat_id: int, db: Session = Depends(get_db),
-                    user: User = Depends(require_admin)):
+                    user: User = Depends(require_perm("products"))):
     c = db.query(UomCategory).filter(UomCategory.id == cat_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="الفئة غير موجودة")
@@ -99,7 +100,7 @@ def list_units(category_id: int | None = None, db: Session = Depends(get_db),
 
 @router.post("/units")
 def create_uom(req: UomCreate, db: Session = Depends(get_db),
-               user: User = Depends(require_admin)):
+               user: User = Depends(require_perm("products"))):
     if not db.query(UomCategory).filter(UomCategory.id == req.category_id).first():
         raise HTTPException(status_code=400, detail="الفئة غير موجودة")
     if req.factor <= 0:
@@ -112,7 +113,7 @@ def create_uom(req: UomCreate, db: Session = Depends(get_db),
 
 @router.put("/units/{uom_id}")
 def update_uom(uom_id: int, req: UomUpdate, db: Session = Depends(get_db),
-               user: User = Depends(require_admin)):
+               user: User = Depends(require_perm("products"))):
     u = db.query(Uom).filter(Uom.id == uom_id).first()
     if not u:
         raise HTTPException(status_code=404, detail="الوحدة غير موجودة")
@@ -126,7 +127,7 @@ def update_uom(uom_id: int, req: UomUpdate, db: Session = Depends(get_db),
 
 @router.delete("/units/{uom_id}")
 def delete_uom(uom_id: int, db: Session = Depends(get_db),
-               user: User = Depends(require_admin)):
+               user: User = Depends(require_perm("products"))):
     u = db.query(Uom).filter(Uom.id == uom_id).first()
     if not u:
         raise HTTPException(status_code=404, detail="الوحدة غير موجودة")

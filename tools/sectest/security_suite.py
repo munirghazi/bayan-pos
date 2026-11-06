@@ -285,7 +285,7 @@ def main():
         ("AUTH-08", "put", "/api/settings/tenant", {"receipt_footer": "x"}),
         ("AUTH-09", "post", "/api/products/", {"name": "x", "price": 1, "stock": 1}),
         ("AUTH-10", "post", "/api/returns/", {"sale_id": sA["id"], "items": [{"product_id": pA["id"], "quantity": 1}], "reason": "x"}),
-        ("AUTH-11", "post", "/api/stock/adjust", {"product_id": pA["id"], "quantity": 5, "reason": "x"}),
+        ("AUTH-11", "post", "/api/stock/adjust", {"product_id": pA["id"], "new_quantity": 5, "note": "x"}),
     ):
         check(cid, f"Cashier cannot {method.upper()} {path}",
               lambda m=method, p=path, b=body: (getattr(api, m)(p, headers=hAc, json=b).status_code == 403,
