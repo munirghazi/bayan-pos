@@ -350,7 +350,9 @@ def search_sales(
         query = query.filter(Sale.location_id == location_id)
 
     total_count = query.count()
-    rows = query.order_by(Sale.issued_at.desc(), Sale.id.desc()).offset(offset).limit(limit).all()
+    from sqlalchemy.orm import selectinload
+    rows = (query.options(selectinload(Sale.payments), selectinload(Sale.customer))
+            .order_by(Sale.issued_at.desc(), Sale.id.desc()).offset(offset).limit(limit).all())
     returned = dict(db.query(Return.sale_id, func.coalesce(func.sum(Return.total), 0))
                       .filter(Return.sale_id.in_([s.id for s in rows] or [0]))
                       .group_by(Return.sale_id).all())

@@ -31,7 +31,9 @@ export default function Login() {
     setLoading(true);
     try {
       const res = await authAPI.login(username, password, tenant.trim());
-      localStorage.setItem('token', res.data.access_token);
+      // The session itself is the httpOnly cookie; keep only a marker here so a
+      // script running in the page can never read a usable token.
+      localStorage.setItem('token', '1');
       localStorage.setItem('user', JSON.stringify(res.data.user));
       localStorage.setItem('tenant_name', res.data.tenant_name || '');
       localStorage.setItem('tenant_slug', res.data.tenant_slug || '');

@@ -26,6 +26,8 @@ from config import settings
 from fastapi import Request
 
 engine = create_engine(settings.database_url, pool_pre_ping=True, future=True,
+                       pool_size=settings.db_pool_size, max_overflow=settings.db_max_overflow,
+                       pool_timeout=settings.db_pool_timeout,
                        connect_args={"client_encoding": "utf8"})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, future=True)
 Base = declarative_base()
@@ -142,6 +144,7 @@ class User(Base):
     location_id = Column(Integer, ForeignKey("locations.id"), nullable=True)  # current branch
     is_active = Column(Boolean, default=True)
     must_change_password = Column(Boolean, default=False, nullable=False)
+    tokens_valid_after = Column(DateTime(timezone=True), nullable=True)   # sessions before this are ended
     created_at = Column(DateTime, default=datetime.utcnow)
 
     sales = relationship("Sale", back_populates="user")
@@ -826,6 +829,7 @@ def get_db(request: Request):
         if payload:
             tid = payload.get("tid")
             sub = payload.get("sub")
+            request.state.token_iat_ms = int(payload.get("iat_ms") or 0)
 
     connection = engine.connect()
     connection.execute(text("SELECT set_config('app.current_tenant', :t, false)"),

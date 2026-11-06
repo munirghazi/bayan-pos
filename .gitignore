@@ -39,3 +39,8 @@ backend/venv/
 # Downloaded files
 *.zip
 drive-download-*/
+
+# security / stress test kit: local configs and reports (contain passwords / results)
+tools/sectest/config.*.json
+!tools/sectest/config.live.example.json
+tools/sectest/*-report-*

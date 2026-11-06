@@ -16,7 +16,7 @@ from routers.auth import get_current_user, require_admin, User
 router = APIRouter()
 
 UPLOADS_DIR = "uploads"
-LOGO_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"}
+LOGO_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}   # content is checked in upload_guard
 
 
 # ===================== Schemas =====================
@@ -232,9 +232,8 @@ def update_tenant_settings(request: Request, req: TenantSettingsUpdate, db: Sess
 @router.post("/upload-logo")
 async def upload_logo(file: UploadFile = File(...), db: Session = Depends(get_db),
                       current_user: User = Depends(require_admin)):
-    ext = os.path.splitext(file.filename)[1].lower()
-    if ext not in LOGO_EXTS:
-        raise HTTPException(status_code=400, detail="نوع الملف غير مدعوم")
+    from upload_guard import IMAGE, read_checked
+    data, ext = await read_checked(file, IMAGE, 2 * 1024 * 1024)   # no SVG (can carry script)
 
     tenant_dir = os.path.join(UPLOADS_DIR, f"tenant_{current_user.tenant_id}")
     os.makedirs(tenant_dir, exist_ok=True)
@@ -248,7 +247,7 @@ async def upload_logo(file: UploadFile = File(...), db: Session = Depends(get_db
 
     filename = f"logo_{uuid.uuid4().hex}{ext}"
     with open(os.path.join(tenant_dir, filename), "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+        buffer.write(data)
 
     url = f"/uploads/tenant_{current_user.tenant_id}/{filename}"
     row = _get_or_create(db)

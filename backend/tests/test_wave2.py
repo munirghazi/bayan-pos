@@ -64,5 +64,13 @@ def test_health_reports_db(client):
 def test_metrics_and_timing_header(client):
     r = client.get("/health")
     assert "x-process-time-ms" in {k.lower() for k in r.headers.keys()}
-    m = client.get("/metrics").json()
+    # /metrics answers only on the server itself (security hardening HDR-02)
+    assert client.get("/metrics").status_code == 404                  # TestClient is not loopback
+    import main as _m
+    from starlette.requests import Request as _Req
+
+    def req(headers=()):
+        return _Req({"type": "http", "client": ("127.0.0.1", 50000), "headers": list(headers)})
+    m = _m.metrics(req())
     assert m["requests_total"] >= 1 and "by_status_class" in m
+    assert _m.metrics(req([(b"x-forwarded-for", b"203.0.113.9")])).status_code == 404

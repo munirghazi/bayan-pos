@@ -13,6 +13,12 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg2://pos_app:app_pw@localhost:5432/pos"
     # Migrations run as the table owner (may differ from the app role).
     migration_database_url: str | None = None
+    # Connections per app worker (stress test: 5+10 ran out at ~160 simultaneous
+    # logins). Keep workers × (size + overflow) well under PostgreSQL's
+    # max_connections (default 100): 2 workers × 20 + console 20 = 60.
+    db_pool_size: int = 10
+    db_max_overflow: int = 10
+    db_pool_timeout: int = 15
 
     # --- Auth / JWT ---
     secret_key: str = ""          # REQUIRED in production; auto-generated in dev

@@ -117,7 +117,12 @@ def get_sales_report(
     if hi:
         q = q.filter(Sale.issued_at < hi)
         rq = rq.filter(Return.issued_at < hi)
-    sales = q.order_by(Sale.issued_at.desc(), Sale.id.desc()).all()
+    # Load items / payments / customer / user in a few bulk queries instead of
+    # 4 queries per invoice (stress test: report p95 8.7 s at ~500 invoices).
+    from sqlalchemy.orm import selectinload
+    sales = (q.options(selectinload(Sale.items), selectinload(Sale.payments),
+                       selectinload(Sale.customer), selectinload(Sale.user))
+             .order_by(Sale.issued_at.desc(), Sale.id.desc()).all())
     credit_notes = rq.order_by(Return.issued_at.desc(), Return.id.desc()).all()
 
     def tot(rows, attr):

@@ -379,27 +379,32 @@ def delete_product(product_id: int, db: Session = Depends(get_db), current_user:
 
 @router.post("/upload-image")
 async def upload_image(file: UploadFile = File(...), current_user: User = Depends(require_admin)):
-    allowed_extensions = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
-    ext = os.path.splitext(file.filename)[1].lower()
-    if ext not in allowed_extensions:
-        raise HTTPException(status_code=400, detail="نوع الملف غير مدعوم")
+    from upload_guard import IMAGE, read_checked
+    data, ext = await read_checked(file, IMAGE, 5 * 1024 * 1024)
 
     filename = f"{uuid.uuid4()}{ext}"
     filepath = os.path.join("uploads", filename)
 
     with open(filepath, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+        buffer.write(data)
 
     return {"url": f"/uploads/{filename}"}
 
 
 @router.put("/{product_id}/stock")
-def update_stock(product_id: int, quantity: float, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def update_stock(product_id: int, quantity: float, db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
+    # Security test AUTH-12: admin only, and recorded in the stock ledger like /stock/adjust.
+    from stock import record_movement
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="المنتج غير موجود")
     if product.is_kit:
         raise HTTPException(status_code=400, detail="لا يمكن تعديل مخزون منتج مُجمّع (kit) مباشرة؛ المخزون مشتق من المكوّنات")
+    if quantity < 0:
+        raise HTTPException(status_code=400, detail="الكمية لا يمكن أن تكون سالبة")
+    delta = round(float(quantity) - float(product.stock or 0), 3)
     product.stock = quantity
+    record_movement(db, product, delta, "adjust", ref_type="adjustment", user_id=current_user.id,
+                    note="تعديل مباشر للمخزون")
     db.commit()
     return {"message": "تم تحديث المخزون", "stock": product.stock}

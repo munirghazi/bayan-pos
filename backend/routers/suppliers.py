@@ -231,16 +231,15 @@ async def upload_document(supplier_id: int, doc_type: str = Form(...),
                           file: UploadFile = File(...), db: Session = Depends(get_db),
                           user: User = Depends(require_admin)):
     sup = _get_supplier(db, supplier_id)
-    ext = os.path.splitext(file.filename)[1].lower()
-    if ext not in DOC_EXTS:
-        raise HTTPException(status_code=400, detail="نوع الملف غير مدعوم")
+    from upload_guard import IMAGE_OR_PDF, read_checked
+    data, ext = await read_checked(file, IMAGE_OR_PDF, 10 * 1024 * 1024)
     doc = _upsert_doc(db, sup, doc_type)
 
     folder = os.path.join(UPLOADS_DIR, f"tenant_{user.tenant_id}", "suppliers", str(sup.id))
     os.makedirs(folder, exist_ok=True)
     filename = f"{doc_type}_{uuid.uuid4().hex}{ext}"
     with open(os.path.join(folder, filename), "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+        buffer.write(data)
 
     doc.file_url = f"/uploads/tenant_{user.tenant_id}/suppliers/{sup.id}/{filename}"
     doc.is_verified = False

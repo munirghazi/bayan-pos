@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from passlib.context import CryptContext
 from sqlalchemy import text
+from sqlalchemy.exc import TimeoutError as SATimeoutError
 
 from config import settings
 
@@ -89,7 +90,10 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="نظام نقاط البيع - متعدد الجهات", version="2.0.0", lifespan=lifespan)
+# Security test HDR-01: no public API map in production.
+app = FastAPI(title="نظام نقاط البيع - متعدد الجهات", version="2.0.0", lifespan=lifespan,
+              docs_url=None if settings.is_production else "/docs", redoc_url=None,
+              openapi_url=None if settings.is_production else "/openapi.json")
 
 # CORS: explicit allow-list, never "*".
 app.add_middleware(
@@ -110,10 +114,25 @@ async def _timing_middleware(request: Request, call_next):
     response = await call_next(request)
     dur_ms = (time.perf_counter() - start) * 1000
     response.headers["X-Process-Time-ms"] = f"{dur_ms:.1f}"
+    # Defence in depth (Caddy adds these too in production).
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    if request.url.path.startswith("/uploads/"):
+        # Uploaded files are data, never pages: even an old SVG cannot run script here.
+        response.headers["Content-Security-Policy"] = "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox"
     _record_metric(response.status_code, dur_ms)
     access_logger.info("%s %s %s %.1fms", request.method, request.url.path,
                        response.status_code, dur_ms)
     return response
+
+
+@app.exception_handler(SATimeoutError)
+async def _db_busy(request: Request, exc: SATimeoutError):
+    # Saturated (all DB connections busy): tell the cashier to retry instead of a 500.
+    access_logger.warning("db pool exhausted on %s %s", request.method, request.url.path)
+    return JSONResponse({"detail": "النظام مشغول حالياً، حاول مرة أخرى بعد لحظات"},
+                        status_code=503, headers={"Retry-After": "5"})
 
 
 @app.get("/health")
@@ -130,7 +149,12 @@ def health():
 
 
 @app.get("/metrics")
-def metrics():
+def metrics(request: Request):
+    # Security test HDR-02: only from the server itself (curl localhost:8000/metrics),
+    # never through Caddy (which adds X-Forwarded-For).
+    host = request.client.host if request.client else ""
+    if host not in ("127.0.0.1", "::1") or "x-forwarded-for" in request.headers:
+        return JSONResponse({"detail": "Not Found"}, status_code=404)
     return _METRICS
 
 

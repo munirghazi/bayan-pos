@@ -515,6 +515,7 @@ def reset_user_password(tid: int, uid: int, request: Request,
     u.password_hash = pwd.hash(temp)
     u.must_change_password = True
     u.is_active = True
+    u.tokens_valid_after = _now()             # the user's open sessions end
     db.execute(text("UPDATE login_attempts SET failed_count=0, locked_until=NULL "
                     "WHERE tenant_slug=:s AND username=:u"), {"s": t.slug, "u": u.username})
     username = u.username

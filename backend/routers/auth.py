@@ -79,8 +79,9 @@ def _validate_location(db, location_id):
 # ===================== Helpers =====================
 
 def create_access_token(*, username: str, tenant_id: int) -> str:
+    import time as _time
     expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    payload = {"sub": username, "tid": tenant_id, "exp": expire}
+    payload = {"sub": username, "tid": tenant_id, "exp": expire, "iat_ms": int(_time.time() * 1000)}
     return jwt.encode(payload, get_secret_key(), algorithm=ALGORITHM)
 
 
@@ -104,6 +105,11 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     user = db.query(User).filter(User.username == username).first()
     if user is None or not user.is_active:
         raise credentials_exception
+    # Ended by logout / password change / reset (security test AUTH-15).
+    if user.tokens_valid_after is not None:
+        iat_ms = getattr(request.state, "token_iat_ms", 0) or 0
+        if iat_ms < user.tokens_valid_after.timestamp() * 1000:
+            raise credentials_exception
     # A tenant suspended from the platform console loses its open sessions too.
     active = db.execute(text("SELECT is_active FROM tenants WHERE id = :i"), {"i": tenant_id}).scalar()
     if not active:
@@ -198,8 +204,20 @@ def login(request: LoginRequest, response: Response, db: Session = Depends(get_d
                          tenant_slug=tenant.slug, tenant_name=tenant.name)
 
 
+def end_sessions(user: User) -> None:
+    """Every token issued before now stops working (all devices of this user)."""
+    from datetime import timezone as _tz
+    user.tokens_valid_after = datetime.now(_tz.utc)
+
+
 @router.post("/logout")
-def logout(response: Response):
+def logout(request: Request, response: Response, db: Session = Depends(get_db)):
+    username = getattr(request.state, "username", None)
+    if username and getattr(request.state, "tenant_id", None) is not None:
+        user = db.query(User).filter(User.username == username).first()
+        if user is not None:
+            end_sessions(user)
+            db.commit()
     response.delete_cookie(settings.cookie_name, path="/", domain=settings.cookie_domain)
     return {"message": "تم تسجيل الخروج"}
 
@@ -218,7 +236,7 @@ def get_me(current_user: User = Depends(get_current_user)):
 
 
 @router.post("/change-password")
-def change_password(request: ChangePasswordRequest, db: Session = Depends(get_db),
+def change_password(request: ChangePasswordRequest, response: Response, db: Session = Depends(get_db),
                     current_user: User = Depends(get_current_user)):
     """Self-service password change for the logged-in user. Also clears the
     must_change_password flag (used by the forced first-login change)."""
@@ -233,8 +251,11 @@ def change_password(request: ChangePasswordRequest, db: Session = Depends(get_db
                             detail="كلمة المرور الجديدة يجب أن تختلف عن الحالية")
     current_user.password_hash = pwd_context.hash(request.new_password)
     current_user.must_change_password = False
+    end_sessions(current_user)               # other devices are logged out …
     db.commit()
-    return {"message": "تم تغيير كلمة المرور بنجاح"}
+    token = create_access_token(username=current_user.username, tenant_id=current_user.tenant_id)
+    _set_auth_cookie(response, token)        # … this one continues with a fresh session
+    return {"message": "تم تغيير كلمة المرور بنجاح", "access_token": token}
 
 
 @router.get("/users", response_model=list[UserResponse])
@@ -274,9 +295,13 @@ def update_user(user_id: int, request: UserUpdate, db: Session = Depends(get_db)
         user.role = request.role
     if request.is_active is not None:
         user.is_active = request.is_active
+        if not request.is_active:
+            end_sessions(user)
     if request.password is not None:
         user.password_hash = pwd_context.hash(request.password)
         user.must_change_password = False
+        if user.id != current_user.id:
+            end_sessions(user)
     if request.location_id is not None:
         _validate_location(db, request.location_id)
         user.location_id = request.location_id

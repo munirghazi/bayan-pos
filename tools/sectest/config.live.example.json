@@ -1,0 +1,13 @@
+{
+  "mode": "live",
+  "base": "https://sahlpos.roaa.sa",
+  "platform": "https://admin.sahlpos.roaa.sa",
+  "password": "PUT-THE-TEST-USERS-PASSWORD-HERE",
+  "tenant_a": "sec-a",
+  "tenant_b": "sec-b",
+  "users": {"admin": "admin", "cashier": "cashier", "locktest": "locktest"},
+  "platform_user": "sectest",
+  "platform_password": "PUT-THE-SECTEST-CONSOLE-PASSWORD-HERE",
+  "platform_totp_secret": "PUT-THE-MANUAL-KEY-SHOWN-UNDER-THE-QR-CODE-HERE (no spaces)",
+  "load_tenants": []
+}
