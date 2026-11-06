@@ -61,7 +61,7 @@ export default function NewTenant() {
         <h2 className="text-xl font-bold text-slate-800">تم إنشاء «{result.tenant.name}»</h2>
         <p className="text-sm text-slate-500 mt-1">أرسل بيانات الدخول التالية للمدير بطريقة آمنة. <b>لن تظهر كلمة المرور مرة أخرى.</b></p>
         <div className="mt-5 text-right bg-slate-50 rounded-xl p-4 space-y-2 text-sm">
-          <Row k="الجهة (المعرّف)" v={result.tenant.slug} />
+          <Row k="اسم المنشأة في شاشة الدخول" v={result.tenant.slug} />
           <Row k="اسم المستخدم" v={result.admin_username} />
           <div className="flex items-center justify-between gap-3">
             <span className="text-slate-500">كلمة المرور المؤقتة</span>
@@ -95,7 +95,7 @@ export default function NewTenant() {
         {step === 1 && <CapabilityFields value={caps} onChange={setCaps} nonprofit={nonprofit} />}
         {step === 2 && (
           <div className="grid sm:grid-cols-2 gap-4">
-            <Field label="معرّف المنشأة (الجهة) *" hint="يكتبه المستخدمون في شاشة الدخول. لا يمكن تغييره لاحقاً.">
+            <Field label="اسم المنشأة في شاشة الدخول (المعرّف) *" hint="يكتبه المستخدمون في شاشة الدخول. لا يمكن تغييره لاحقاً.">
               <Input dir="ltr" value={access.slug} onChange={(e) => { setSlugTouched(true); setAccess({ ...access, slug: e.target.value.toLowerCase() }); }} />
             </Field>
             <Field label="اسم مستخدم المدير *">

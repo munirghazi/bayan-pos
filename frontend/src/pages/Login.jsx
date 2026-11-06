@@ -24,7 +24,7 @@ export default function Login() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!tenant || !username || !password) {
-      toast.error('الرجاء إدخال الجهة واسم المستخدم وكلمة المرور');
+      toast.error('الرجاء إدخال اسم المنشأة واسم المستخدم وكلمة المرور');
       return;
     }
 
@@ -78,14 +78,14 @@ export default function Login() {
         <form onSubmit={handleSubmit} className="space-y-5">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              الجهة
+              اسم المنشأة
             </label>
             <input
               type="text"
               value={tenant}
               onChange={(e) => setTenant(e.target.value)}
               className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-bayan-green focus:border-transparent outline-none transition-all text-right"
-              placeholder="معرّف الجهة (مثال: bayan)"
+              placeholder="معرّف المنشأة (مثال: bayan)"
               autoFocus
               dir="ltr"
             />

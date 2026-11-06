@@ -168,12 +168,12 @@ def login(request: LoginRequest, response: Response, db: Session = Depends(get_d
     # A tenant must always be specified (multi-organization; no auto-pick).
     if not request.tenant:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                            detail="يجب تحديد الجهة (tenant)")
+                            detail="يجب تحديد اسم المنشأة")
     tenant = db.query(Tenant).filter(
         Tenant.slug == request.tenant, Tenant.is_active == True).first()  # noqa: E712
     if tenant is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                            detail="الجهة غير موجودة أو غير مفعّلة")
+                            detail="المنشأة غير موجودة أو غير مفعّلة")
 
     # Pin this connection to the tenant so the user lookup is RLS-scoped.
     _pin_session_tenant(db, tenant.id)

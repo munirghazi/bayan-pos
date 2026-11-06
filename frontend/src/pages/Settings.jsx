@@ -371,7 +371,7 @@ export default function Settings() {
               <HiOutlinePhotograph className="text-bayan-green" />
               الهوية البصرية (الألوان)
             </h2>
-            <p className="text-sm text-gray-500">تُطبَّق ألوان الجهة على الواجهة والفواتير. المعاينة فورية.</p>
+            <p className="text-sm text-gray-500">تُطبَّق ألوان المنشأة على الواجهة والفواتير. المعاينة فورية.</p>
             <div className="grid sm:grid-cols-2 gap-4">
               <div>
                 <label className="text-sm text-gray-600">اللون الأساسي</label>
