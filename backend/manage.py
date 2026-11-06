@@ -15,6 +15,14 @@ Run from the backend/ folder with the venv active and .env present:
              company sole_establishment online_store freelancer other
       (identity is platform-controlled: the tenant's admin cannot change it)
 
+  Platform console admins (Release 2b — NOT tenant users):
+  python manage.py platform-admin list
+  python manage.py platform-admin create <username> "<full name>"   # asks for the password
+  python manage.py platform-admin reset-mfa <username>  # re-enrol the authenticator at next login
+  python manage.py platform-admin unlock <username>
+  python manage.py platform-admin disable|enable <username>
+  python manage.py platform-admin set-password <username>           # asks for the password
+
 Counts are RLS-scoped per tenant (the app role sees one tenant at a time), so
 this reflects exactly what each organization can see.
 """
@@ -162,6 +170,90 @@ def cmd_identity(db, args):
     return 0
 
 
+def cmd_platform_admin(db, args):
+    import getpass
+    from datetime import datetime, timezone
+    from database import PlatformAdmin, PlatformAuditLog
+    from routers.platform import password_problem
+
+    def log(action, a, detail=None):
+        db.add(PlatformAuditLog(admin_id=a.id if a else None, username="cli",
+                                action=action, target=a.username if a else None, detail=detail))
+
+    if args.action == "list":
+        rows = db.query(PlatformAdmin).order_by(PlatformAdmin.id).all()
+        if not rows:
+            print("No platform admins yet. Create one: python manage.py platform-admin create <username> \"<name>\"")
+        for a in rows:
+            print(f"  {a.id:<4}{a.username:<20}{'active' if a.is_active else 'DISABLED':<10}"
+                  f"{'2FA on' if a.totp_enabled else '2FA not enrolled':<18}"
+                  f"{'LOCKED' if a.locked_until and a.locked_until > datetime.now(timezone.utc) else ''}"
+                  f"  last login: {a.last_login_at or '-'}")
+        return 0
+    if not args.username:
+        print("username is required")
+        return 1
+    a = db.query(PlatformAdmin).filter(PlatformAdmin.username == args.username).first()
+
+    def ask_password():
+        pw = args.password or getpass.getpass("Password (min 12, letters + digits): ")
+        if not args.password and pw != getpass.getpass("Repeat: "):
+            print("Passwords do not match.")
+            return None
+        err = password_problem(pw)
+        if err:
+            print("Not saved: " + err)
+            return None
+        return pw
+
+    if args.action == "create":
+        if a:
+            print(f"Platform admin '{args.username}' already exists.")
+            return 1
+        pw = ask_password()
+        if not pw:
+            return 1
+        a = PlatformAdmin(username=args.username, full_name=args.full_name or args.username,
+                          password_hash=pwd.hash(pw), password_changed_at=datetime.now(timezone.utc))
+        db.add(a)
+        db.flush()
+        log("admin_created", a)
+        db.commit()
+        print(f"Created platform admin '{a.username}'. At the first login the console shows a QR "
+              f"code: scan it with an authenticator app (Google/Microsoft Authenticator, Authy).")
+        return 0
+    if not a:
+        print(f"Platform admin '{args.username}' not found.")
+        return 1
+    if args.action == "reset-mfa":
+        a.totp_enabled, a.totp_secret, a.totp_last_step = False, None, None
+        log("mfa_reset", a)
+        msg = "2FA reset: a new QR code will be shown at the next login."
+    elif args.action == "unlock":
+        a.failed_count, a.locked_until = 0, None
+        log("admin_unlocked", a)
+        msg = "Unlocked."
+    elif args.action in ("disable", "enable"):
+        a.is_active = args.action == "enable"
+        log(f"admin_{args.action}d", a)
+        msg = f"{'Enabled' if a.is_active else 'Disabled'}."
+    elif args.action == "set-password":
+        pw = ask_password()
+        if not pw:
+            return 1
+        a.password_hash = pwd.hash(pw)
+        a.password_changed_at = datetime.now(timezone.utc)
+        a.failed_count, a.locked_until = 0, None
+        log("admin_password_set", a)
+        msg = "Password changed (open sessions are ended)."
+    else:
+        print("unknown action")
+        return 1
+    db.commit()
+    print(msg)
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description="Bayan POS tenant admin")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -187,6 +279,12 @@ def main():
     i.add_argument("--vat-enabled", dest="vat_enabled", choices=["yes", "no"])
     i.add_argument("--vat-rate", dest="vat_rate", type=float)
 
+    pa_ = sub.add_parser("platform-admin", help="Manage platform console admins")
+    pa_.add_argument("action", choices=["list", "create", "reset-mfa", "unlock", "disable", "enable", "set-password"])
+    pa_.add_argument("username", nargs="?")
+    pa_.add_argument("full_name", nargs="?")
+    pa_.add_argument("--password", help=argparse.SUPPRESS)   # tests / automation only
+
     for name in ("activate", "deactivate", "delete"):
         p = sub.add_parser(name)
         p.add_argument("slug")
@@ -208,6 +306,8 @@ def main():
             cmd_delete(db, args)
         elif args.command == "identity":
             return cmd_identity(db, args)
+        elif args.command == "platform-admin":
+            return cmd_platform_admin(db, args)
     finally:
         db.close()
 

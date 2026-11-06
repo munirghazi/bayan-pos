@@ -49,6 +49,18 @@ class Settings(BaseSettings):
     private_storage_dir: str = "storage"
     proof_max_bytes: int = 5 * 1024 * 1024
 
+    # --- Platform console (Release 2b, separate process on its own subdomain) ---
+    # Optional own secret; when empty, keys are derived from SECRET_KEY.
+    # NOTE: the TOTP secrets are encrypted with this key: changing it means
+    # every platform admin must re-enrol (python manage.py platform-admin reset-mfa).
+    platform_secret_key: str = ""
+    platform_cookie_name: str = "platform_session"
+    platform_session_minutes: int = 30          # idle timeout (sliding)
+    platform_session_max_hours: int = 8        # absolute cap, then log in again
+    platform_max_login_attempts: int = 5
+    platform_lockout_minutes: int = 15
+    platform_issuer: str = "SahlPOS Platform"   # label shown in the authenticator app
+
     @property
     def cors_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

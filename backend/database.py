@@ -16,7 +16,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     create_engine, event, text, FetchedValue,
-    Column, Integer, String, Float, Numeric, Boolean, DateTime, Date, ForeignKey, Text,
+    Column, Integer, BigInteger, String, Float, Numeric, Boolean, DateTime, Date, ForeignKey, Text,
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -713,6 +713,43 @@ class TenantAuditLog(Base):
     target = Column(String(120), nullable=True)
     detail = Column(Text, nullable=True)
     created_at = Column(DateTime, server_default=text("now()"))
+
+
+# ===================== Release 2b: platform console =====================
+
+class PlatformAdmin(Base):
+    """A platform operator (admin.sahlpos…). Not a tenant user; 2FA mandatory."""
+    __tablename__ = "platform_admins"
+    id = Column(Integer, primary_key=True)
+    username = Column(String(50), unique=True, nullable=False)
+    password_hash = Column(String(255), nullable=False)
+    full_name = Column(String(100), nullable=False)
+    email = Column(String(200), nullable=True)
+    totp_secret = Column(Text, nullable=True)            # Fernet-encrypted
+    totp_enabled = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    totp_last_step = Column(BigInteger, nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    failed_count = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    locked_until = Column(DateTime(timezone=True), nullable=True)
+    last_login_at = Column(DateTime(timezone=True), nullable=True)
+    last_login_ip = Column(String(64), nullable=True)
+    password_changed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=text("now()"))
+
+
+class PlatformAuditLog(Base):
+    """Append-only trail of platform actions (DB trigger forbids UPDATE/DELETE)."""
+    __tablename__ = "platform_audit_log"
+    id = Column(BigInteger, primary_key=True)
+    admin_id = Column(Integer, nullable=True)
+    username = Column(String(50), nullable=True)
+    action = Column(String(60), nullable=False)
+    tenant_ref = Column(Integer, nullable=True)          # no FK: survives tenant deletion
+    tenant_slug = Column(String(50), nullable=True)
+    target = Column(String(200), nullable=True)
+    detail = Column(JSONB, nullable=True)
+    ip = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=text("now()"))
 
 
 # ===================== Consignment (v1) =====================

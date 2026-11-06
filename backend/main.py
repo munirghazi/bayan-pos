@@ -172,7 +172,8 @@ if os.path.isdir(FRONTEND_BUILD):
         if (exc.status_code == 404 and request.method == "GET"
                 and not path.startswith("/api") and not path.startswith("/uploads")):
             candidate = os.path.join(FRONTEND_BUILD, path.lstrip("/"))
-            if path not in ("", "/") and os.path.isfile(candidate):
+            # the platform console page is served only by platform_main (admin subdomain)
+            if path not in ("", "/") and os.path.isfile(candidate) and not path.startswith("/platform"):
                 return FileResponse(candidate)
             index = os.path.join(FRONTEND_BUILD, "index.html")
             if os.path.isfile(index):

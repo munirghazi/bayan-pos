@@ -1,0 +1,20 @@
+# Release 2b — platform console. Append to /etc/caddy/Caddyfile (after the
+# tenant site block), replace the domain, then:  sudo systemctl reload caddy
+admin.your-domain.sa {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:8001
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        -Server
+    }
+
+    # Optional extra layer in front of the console's own login + 2FA.
+    # 1) sudo caddy hash-password   (type a password, copy the hash)
+    # 2) uncomment and paste the hash:
+    # (Caddy older than 2.8: write basicauth instead of basic_auth)
+    # basic_auth {
+    #     ops <PASTE_HASH_HERE>
+    # }
+
+}

@@ -1,0 +1,21 @@
+# /etc/systemd/system/bayan-platform.service
+# Release 2b: the platform console (admin.<domain>) — same code + DB as bayan-pos,
+# separate process, listens on localhost only (Caddy is the only way in).
+[Unit]
+Description=Bayan POS platform console (FastAPI/uvicorn)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+User=bayan
+Group=bayan
+WorkingDirectory=/srv/bayan-pos/backend
+EnvironmentFile=/srv/bayan-pos/backend/.env
+ExecStart=/srv/bayan-pos/backend/.venv/bin/uvicorn platform_main:app --host 127.0.0.1 --port 8001 --workers 1
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

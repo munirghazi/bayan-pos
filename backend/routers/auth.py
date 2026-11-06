@@ -104,6 +104,11 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     user = db.query(User).filter(User.username == username).first()
     if user is None or not user.is_active:
         raise credentials_exception
+    # A tenant suspended from the platform console loses its open sessions too.
+    active = db.execute(text("SELECT is_active FROM tenants WHERE id = :i"), {"i": tenant_id}).scalar()
+    if not active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail="المنشأة موقوفة. تواصل مع إدارة المنصة.")
     return user
 
 
