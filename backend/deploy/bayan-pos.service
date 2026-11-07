@@ -9,7 +9,8 @@ User=bayan
 Group=bayan
 WorkingDirectory=/srv/bayan-pos/backend
 EnvironmentFile=/srv/bayan-pos/backend/.env
-ExecStart=/srv/bayan-pos/backend/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000 --workers 2
+ExecStart=/srv/bayan-venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000 --workers 2
+UMask=0027
 Restart=on-failure
 RestartSec=3
 

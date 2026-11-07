@@ -54,7 +54,21 @@ if [ -f "$ENV" ]; then
   grep -q '^BOOTSTRAP_ADMIN_PASSWORD=.\+' "$ENV" && warn "BOOTSTRAP_ADMIN_PASSWORD still set (remove after first setup)" || ok "no bootstrap password in .env"
 else bad "$ENV not found"; fi
 p=$(stat -c %a $APPDIR/backend/storage/proofs 2>/dev/null); [ -n "$p" ] && { [ "$p" -le 750 ] && ok "proofs folder $p" || bad "proofs folder too open ($p)"; }
-[ -d $APPDIR/.git ] && sudo -u "$(stat -c %U $APPDIR)" git -C $APPDIR ls-files | grep -qE '(^|/)\.env$|\.dev_secret|\.pem$|id_rsa' && bad "a secret file is tracked in git" || ok "no secret files tracked in git"
+if [ -d $APPDIR/.git ]; then
+  owner=$(stat -c %U $APPDIR)
+  hits=$(sudo -u "$owner" git -C $APPDIR ls-files | grep -vE '(^|/)\.?venv/' | grep -E '(^|/)\.env$|\.dev_secret|\.pem$|\.key$|id_rsa|id_ed25519')
+  [ -z "$hits" ] && ok "no secret files tracked in git" || bad "secret-looking files tracked in git: $(echo $hits | tr '\n' ' ')"
+  n=$(sudo -u "$owner" git -C $APPDIR ls-files | grep -cE '(^|/)\.?venv/')
+  [ "$n" -eq 0 ] && ok "no Python environment tracked in git" || warn "$n files of a Python environment are tracked in git (apply the .venv clean-up release)"
+fi
+for u in bayan-pos bayan-platform; do
+  ex=$(systemctl cat $u 2>/dev/null | grep '^ExecStart=' | tail -1)
+  case "$ex" in
+    *"/srv/bayan-venv/"*) ok "$u runs from /srv/bayan-venv";;
+    "") warn "$u service not found";;
+    *) warn "$u runs from inside the repository ($ex)";;
+  esac
+done
 
 echo; echo "— Database"
 pg_ver=$(sudo -u postgres psql -Atc "show server_version" 2>/dev/null); ok "PostgreSQL $pg_ver"

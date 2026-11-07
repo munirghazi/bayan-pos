@@ -1,4 +1,9 @@
 # Python
+# virtual environments are never committed (the server's lives in /srv/bayan-venv)
+.venv/
+**/.venv/
+venv/
+**/venv/
 __pycache__/
 *.py[cod]
 *.pyo
@@ -44,3 +49,9 @@ drive-download-*/
 tools/sectest/config.*.json
 !tools/sectest/config.live.example.json
 tools/sectest/*-report-*
+
+# the server's app user (bayan) has its home in /srv/bayan-pos
+.cache/
+.npm/
+.lesshst
+.bash_history

@@ -105,7 +105,7 @@ sudo bash tools/sectest/server_checks.sh
 1. Console → new tenant `sec-a` (جمعية أهلية, licence number, VAT off), and again `sec-b`. Save both temporary passwords.
 2. Log in to each on `https://sahlpos.roaa.sa`, set the password (the **same** password for every test user), complete the national address in Settings, and add two users: `cashier` (كاشير) and `locktest` (كاشير).
 3. A separate console admin for the test (never use yours):
-   `sudo -u bayan .venv/bin/python manage.py platform-admin create sectest "Security test"` → log in once on the console, scan the QR, **copy the manual key**.
+   `sudo -u bayan /srv/bayan-venv/bin/python manage.py platform-admin create sectest "Security test"` → log in once on the console, scan the QR, **copy the manual key**.
 4. `cp config.live.example.json config.live.json` and fill in the passwords and the manual key.
 
 ### 2d. Run (from the laptop)
@@ -120,9 +120,9 @@ bash external_checks.sh
 
 ```bash
 cd /srv/bayan-pos/backend
-sudo -u bayan .venv/bin/python manage.py platform-admin disable sectest
-sudo -u bayan .venv/bin/python manage.py delete sec-a --yes      # test invoices: manage.py may purge them
-sudo -u bayan .venv/bin/python manage.py delete sec-b --yes
+sudo -u bayan /srv/bayan-venv/bin/python manage.py platform-admin disable sectest
+sudo -u bayan /srv/bayan-venv/bin/python manage.py delete sec-a --yes      # test invoices: manage.py may purge them
+sudo -u bayan /srv/bayan-venv/bin/python manage.py delete sec-b --yes
 ```
 
 The console refuses to delete tenants with invoices (6-year retention); `manage.py delete` is the emergency route and is correct here because these invoices are test data. `locktest` stays locked for 15 minutes after the run — that is the lockout check working.
