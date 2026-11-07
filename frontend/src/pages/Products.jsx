@@ -4,6 +4,7 @@ import { productsAPI, suppliersAPI, uomAPI, apiError } from '../services/api';
 import { Button, EmptyState, Field, Input, Select, MoneyInput, SwitchRow } from '../components/ui';
 
 import PrintLabelsModal from '../components/PrintLabelsModal';
+import ArchiveDialog from '../components/ArchiveDialog';
 import { SarIcon } from '../components/SarIcon';
 import toast from 'react-hot-toast';
 import {
@@ -30,6 +31,7 @@ export default function Products({ embedded = false }) {
   const [categoryName, setCategoryName] = useState('');
   const [editingCategory, setEditingCategory] = useState(null);
   const submittingRef = useRef(false);  // prevents duplicate submits
+  const [showArchived, setShowArchived] = useState(false);
 
   const [form, setForm] = useState({
     name: '',
@@ -63,7 +65,7 @@ export default function Products({ embedded = false }) {
   const loadData = async () => {
     try {
       const [prodRes, catRes] = await Promise.all([
-        can('products') ? productsAPI.getAllAdmin() : productsAPI.getAll(),
+        can('products') ? productsAPI.getAllAdmin(true) : productsAPI.getAll(),
         productsAPI.getCategories(),
       ]);
       setProducts(prodRes.data);
@@ -127,6 +129,34 @@ export default function Products({ embedded = false }) {
 
   const [printItems, setPrintItems] = useState(null);
   const [quickSupplier, setQuickSupplier] = useState(null);
+  // Enter = next field (tester: Enter saved and closed the form). Ctrl+Enter saves.
+  // a new product starts on the basic counting unit ("حبة"), so purchase / sale units are usable at once
+  useEffect(() => {
+    if (!showForm || editingProduct || form.uom_id || !units.length) return;
+    const countCat = uomCategories.find((c) => c.name === 'عدد') || uomCategories[0];
+    const base = units.find((u) => countCat && u.category_id === countCat.id && u.is_reference);
+    if (base) setForm((f) => ({ ...f, uom_id: String(base.id), uom_category_id: String(base.category_id) }));
+  }, [showForm, editingProduct, units, uomCategories]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const unitHint = (id) => {
+    if (!id || !form.uom_id) return undefined;
+    const u = units.find((x) => String(x.id) === String(id));
+    const base = units.find((x) => String(x.id) === String(form.uom_id));
+    if (!u || !base || !u.factor || !base.factor) return undefined;
+    const n = u.factor / base.factor;
+    return `${u.name} = ${+n.toFixed(3)} ${base.name}`;
+  };
+  const enterToNext = (e) => {
+    if (e.key !== 'Enter' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'BUTTON') return;
+    if (e.ctrlKey || e.metaKey) { e.preventDefault(); e.currentTarget.requestSubmit(); return; }   // Ctrl+Enter saves
+    if (e.target.dataset?.enter === 'own') return;           // field handles Enter itself
+    e.preventDefault();
+    const fields = Array.from(e.currentTarget.querySelectorAll('input, select, textarea, button[type=submit]'))
+      .filter((el) => !el.disabled && el.type !== 'file' && el.type !== 'hidden' && el.offsetParent !== null);
+    const i = fields.indexOf(e.target);
+    const next = fields[i + 1];
+    if (next) { next.focus(); if (next.select && next.tagName === 'INPUT') next.select(); }
+  };
   const saveQuickSupplier = async () => {
     const name = (quickSupplier?.name || '').trim();
     if (!name) { toast.error('أدخل اسم المورّد'); return; }
@@ -139,9 +169,11 @@ export default function Products({ embedded = false }) {
     } catch (e) { toast.error(apiError(e, 'تعذّرت إضافة المورّد')); }
   };
 
+  const visibleProducts = useMemo(() => products.filter((p) => (showArchived ? !p.is_active : p.is_active !== false)), [products, showArchived]);
+  const archivedCount = useMemo(() => products.filter((p) => p.is_active === false).length, [products]);
   const groupedProducts = useMemo(() => {
     const map = {};
-    products.forEach((pr) => {
+    visibleProducts.forEach((pr) => {
       const key = pr.category?.name || 'بدون تصنيف';
       (map[key] = map[key] || []).push(pr);
     });
@@ -150,7 +182,7 @@ export default function Products({ embedded = false }) {
       if (b[0] === 'بدون تصنيف') return -1;
       return a[0].localeCompare(b[0], 'ar');
     });
-  }, [products]);
+  }, [visibleProducts]);
 
   const printLabels = async (ids) => {
     try {
@@ -160,15 +192,12 @@ export default function Products({ embedded = false }) {
     } catch (e) { toast.error(apiError(e, 'تعذّر تجهيز الباركود')); }
   };
 
-  const handleDelete = async (id) => {
-    if (!confirm('هل أنت متأكد من حذف هذا المنتج؟')) return;
-    try {
-      await productsAPI.delete(id);
-      toast.success('تم حذف المنتج');
-      loadData();
-    } catch (err) {
-      toast.error('خطأ في حذف المنتج');
-    }
+  // delete / archive goes through a dialog that shows the consequences
+  const [archiving, setArchiving] = useState(null);
+  const handleDelete = (id) => setArchiving(products.find((p) => p.id === id) || null);
+  const restore = async (p) => {
+    try { await productsAPI.restore(p.id); toast.success(`تمت استعادة «${p.name}»`); loadData(); }
+    catch (e) { toast.error(apiError(e, 'تعذّرت الاستعادة')); }
   };
 
   const handleEdit = (product) => {
@@ -267,11 +296,18 @@ export default function Products({ embedded = false }) {
       <div className="flex items-center justify-between">
         <div>
           {!embedded && <h1 className="text-2xl font-bold text-gray-800">إدارة المنتجات</h1>}
-          <p className="text-gray-500 mt-1">{products.length} منتج</p>
+          <p className="text-gray-500 mt-1 flex items-center gap-3">
+            {showArchived ? `${visibleProducts.length} منتج مؤرشف` : `${visibleProducts.length} منتج`}
+            {can('products') && (archivedCount > 0 || showArchived) && (
+              <button onClick={() => setShowArchived(!showArchived)} className="text-sm text-bayan-green hover:underline">
+                {showArchived ? '← العودة للمنتجات النشطة' : `عرض المؤرشفة (${archivedCount})`}
+              </button>
+            )}
+          </p>
         </div>
         {can('products') && (
           <div className="flex gap-3">
-            <Button variant="secondary" icon={<HiOutlinePrinter />} onClick={() => printLabels(products.map((p) => p.id))}>طباعة ملصقات</Button>
+            <Button variant="secondary" icon={<HiOutlinePrinter />} onClick={() => printLabels(visibleProducts.map((p) => p.id))}>طباعة ملصقات</Button>
             <Button variant="secondary" icon={<HiOutlineTag />} onClick={() => { setShowCategoryForm(true); setEditingCategory(null); setCategoryName(''); }}>التصنيفات</Button>
             <Button variant="primary" icon={<HiOutlinePlus />} onClick={() => { resetForm(); setShowForm(true); }}>إضافة منتج</Button>
           </div>
@@ -346,12 +382,19 @@ export default function Products({ embedded = false }) {
                     >
                       <HiOutlinePencil />
                     </button>
-                    <button
-                      onClick={() => handleDelete(product.id)}
-                      className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-all"
-                    >
-                      <HiOutlineTrash />
-                    </button>
+                    {product.is_active === false ? (
+                      <button onClick={() => restore(product)} className="px-3 py-1.5 text-sm text-bayan-green hover:bg-bayan-light/40 rounded-lg" title="استعادة">
+                        استعادة
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleDelete(product.id)}
+                        className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                        title="حذف أو أرشفة"
+                      >
+                        <HiOutlineTrash />
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -362,10 +405,19 @@ export default function Products({ embedded = false }) {
         </div>
       ))}
 
-      {products.length === 0 && (
+      {visibleProducts.length === 0 && !showArchived && (
         <EmptyState icon={<HiOutlinePhotograph />} title="لا توجد منتجات بعد"
           subtitle="اضغط على «إضافة منتج» للبدء"
           action={can('products') ? <Button icon={<HiOutlinePlus />} onClick={() => { resetForm(); setShowForm(true); }}>إضافة منتج</Button> : null} />
+      )}
+
+      {archiving && (
+        <ArchiveDialog title="حذف أو أرشفة منتج" name={archiving.name}
+          loadUsage={() => productsAPI.usage(archiving.id)}
+          onArchive={() => productsAPI.archive(archiving.id)}
+          onDelete={() => productsAPI.delete(archiving.id)}
+          onClose={() => setArchiving(null)}
+          onDone={() => { setArchiving(null); loadData(); }} />
       )}
 
       {/* Product Form Modal */}
@@ -374,7 +426,7 @@ export default function Products({ embedded = false }) {
       )}
       {showForm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-2 sm:p-4">
-          <form onSubmit={handleSubmit}
+          <form onSubmit={handleSubmit} onKeyDown={enterToNext}
             className="bg-white rounded-2xl w-full max-w-6xl max-h-[96vh] flex flex-col shadow-xl">
             <div className="flex items-center justify-between px-5 py-3 border-b">
               <h2 className="text-lg font-bold text-gray-800">{editingProduct ? `تعديل: ${editingProduct.name}` : 'إضافة منتج جديد'}</h2>
@@ -431,40 +483,41 @@ export default function Products({ embedded = false }) {
                 {/* 3 — stock, unit, supplier */}
                 <section className="space-y-3">
                   <h3 className="text-xs font-bold text-gray-500">المخزون والوحدة والمورّد</h3>
-                  <Field label="يُحسب المخزون بـ" hint="اختر من القائمة الموحّدة لوحدات القياس">
-                    <Select value={form.uom_id}
-                      onChange={(e) => {
-                        const u = units.find((x) => String(x.id) === e.target.value);
-                        setForm({ ...form, uom_id: e.target.value, uom_category_id: u ? String(u.category_id) : '', purchase_uom_id: '', sales_uom_id: '' });
-                      }}>
-                      <option value="">— حبة (افتراضي) —</option>
-                      {uomCategories.map((c) => (
-                        <optgroup key={c.id} label={c.name}>
-                          {units.filter((u) => u.category_id === c.id).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-                        </optgroup>
-                      ))}
-                    </Select>
-                  </Field>
-                  {form.uom_id && catUnits.length > 1 && (
-                    <details className="rounded-xl border border-gray-200 p-3" open={!!(form.sales_uom_id || form.purchase_uom_id)}>
-                      <summary className="text-sm text-gray-700 cursor-pointer">يُباع أو يُشترى بوحدة أخرى؟ <span className="text-xs text-gray-400">(اختياري)</span></summary>
-                      <p className="text-xs text-gray-500 my-2">مثال: يُخزّن بالحبة، يُشترى بالكرتون (24 حبة)، ويُباع بالحبة.</p>
-                      <div className="grid grid-cols-2 gap-3">
-                        <Field label="يُباع بـ">
-                          <Select value={form.sales_uom_id} onChange={(e) => setForm({ ...form, sales_uom_id: e.target.value })}>
-                            <option value="">نفس وحدة المخزون</option>
-                            {catUnits.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-                          </Select>
-                        </Field>
-                        <Field label="يُشترى بـ">
-                          <Select value={form.purchase_uom_id} onChange={(e) => setForm({ ...form, purchase_uom_id: e.target.value })}>
-                            <option value="">نفس وحدة المخزون</option>
-                            {catUnits.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-                          </Select>
-                        </Field>
-                      </div>
-                    </details>
-                  )}
+                  <div className="rounded-xl border border-gray-200 p-3 space-y-3">
+                    <p className="text-xs text-gray-500">الوحدات والتعبئة — من القائمة الموحّدة في «وحدات القياس»</p>
+                    <Field label="الوحدة الأساسية (يُحسب بها المخزون)">
+                      <Select value={form.uom_id}
+                        onChange={(e) => {
+                          const u = units.find((x) => String(x.id) === e.target.value);
+                          setForm({ ...form, uom_id: e.target.value, uom_category_id: u ? String(u.category_id) : '', purchase_uom_id: '', sales_uom_id: '' });
+                        }}>
+                        <option value="">— اختر —</option>
+                        {uomCategories.map((c) => (
+                          <optgroup key={c.id} label={c.name}>
+                            {units.filter((u) => u.category_id === c.id).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                          </optgroup>
+                        ))}
+                      </Select>
+                    </Field>
+                    <div className="grid grid-cols-2 gap-3">
+                      <Field label="وحدة الشراء" hint={unitHint(form.purchase_uom_id)}>
+                        <Select value={form.purchase_uom_id} disabled={!form.uom_id} onChange={(e) => setForm({ ...form, purchase_uom_id: e.target.value })}>
+                          <option value="">نفس الأساسية</option>
+                          {catUnits.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                        </Select>
+                      </Field>
+                      <Field label="وحدة البيع" hint={unitHint(form.sales_uom_id)}>
+                        <Select value={form.sales_uom_id} disabled={!form.uom_id} onChange={(e) => setForm({ ...form, sales_uom_id: e.target.value })}>
+                          <option value="">نفس الأساسية</option>
+                          {catUnits.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                        </Select>
+                      </Field>
+                    </div>
+                    {form.uom_id && catUnits.length < 2 && (
+                      <p className="text-xs text-amber-700">لا توجد وحدات تعبئة لهذا النوع بعد (مثل الكرتون) — أضفها من «وحدات القياس».</p>
+                    )}
+                    <p className="text-xs text-gray-400">مثال: الأساسية «حبة»، الشراء «كرتون» (= 24 حبة)، البيع «حبة». يتحوّل المخزون تلقائياً.</p>
+                  </div>
                   <div className="grid grid-cols-2 gap-3">
                     <Field label={editingProduct ? 'الكمية الحالية' : 'الكمية الافتتاحية'} hint={form.is_kit ? 'تُحسب من المكوّنات' : editingProduct ? 'للتعديل استخدم «حركة المخزون»' : undefined}>
                       <Input type="number" min="0" step="any" value={form.is_kit ? '' : form.stock} disabled={form.is_kit || !!editingProduct}
@@ -490,7 +543,7 @@ export default function Products({ embedded = false }) {
                       <p className="text-sm font-medium text-gray-700">مورّد جديد</p>
                       <Input value={quickSupplier.name} autoFocus placeholder="اسم المورّد"
                         onChange={(e) => setQuickSupplier({ name: e.target.value })}
-                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); saveQuickSupplier(); } }} />
+                        data-enter="own" onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); saveQuickSupplier(); } }} />
                       <p className="text-xs text-gray-500">تُستكمل مستنداته لاحقاً من شاشة «الموردون» قبل إصدار أوامر شراء له.</p>
                       <div className="flex gap-2">
                         <Button type="button" size="sm" onClick={saveQuickSupplier}>إضافة واختيار</Button>
@@ -509,7 +562,7 @@ export default function Products({ embedded = false }) {
                       <Select value={c.product_id} className="flex-1"
                         onChange={(e) => setForm({ ...form, components: form.components.map((x, idx) => (idx === i ? { ...x, product_id: e.target.value } : x)) })}>
                         <option value="">اختر منتجاً…</option>
-                        {products.filter((pr) => !pr.is_kit && (!editingProduct || pr.id !== editingProduct.id)).map((pr) => <option key={pr.id} value={pr.id}>{pr.name}</option>)}
+                        {products.filter((pr) => pr.is_active !== false && !pr.is_kit && (!editingProduct || pr.id !== editingProduct.id)).map((pr) => <option key={pr.id} value={pr.id}>{pr.name}</option>)}
                       </Select>
                       <Input type="number" step="any" min="0" value={c.quantity} placeholder="الكمية" className="!w-28 text-center"
                         onChange={(e) => setForm({ ...form, components: form.components.map((x, idx) => (idx === i ? { ...x, quantity: e.target.value } : x)) })} />
@@ -524,7 +577,8 @@ export default function Products({ embedded = false }) {
             </div>
 
             <div className="flex gap-3 px-5 py-3 border-t bg-gray-50 rounded-b-2xl">
-              <Button type="submit" className="flex-1 sm:flex-none sm:px-10">{editingProduct ? 'حفظ التعديلات' : 'إضافة المنتج'}</Button>
+              <Button type="submit" className="flex-1 sm:flex-none sm:px-10" title="أو Ctrl+Enter">{editingProduct ? 'حفظ التعديلات' : 'إضافة المنتج'}</Button>
+              <span className="hidden sm:flex items-center text-xs text-gray-400">Enter للانتقال للحقل التالي · Ctrl+Enter للحفظ</span>
               <Button type="button" variant="secondary" onClick={resetForm}>إلغاء</Button>
             </div>
           </form>

@@ -109,6 +109,7 @@ def get_sales_report(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    from sqlalchemy.orm import selectinload
     lo, hi = _range_utc(start_date, end_date)
     q = db.query(Sale)
     rq = db.query(Return)
@@ -124,7 +125,8 @@ def get_sales_report(
     sales = (q.options(selectinload(Sale.items), selectinload(Sale.payments),
                        selectinload(Sale.customer), selectinload(Sale.user))
              .order_by(Sale.issued_at.desc(), Sale.id.desc()).all())
-    credit_notes = rq.order_by(Return.issued_at.desc(), Return.id.desc()).all()
+    credit_notes = (rq.options(selectinload(Return.sale).selectinload(Sale.customer))
+                    .order_by(Return.issued_at.desc(), Return.id.desc()).all())
 
     def tot(rows, attr):
         return sum(inv.d(getattr(r, attr) or 0) for r in rows)
@@ -155,6 +157,7 @@ def get_sales_report(
                           "proof_id": p.proof_id} for p in s.payments],
             "change_given": _f(s.change_given),
             "customer_name": s.customer.name if s.customer else None,
+            "customer_phone": s.customer.phone if s.customer else None,
             "issued_at": inv.iso_z(s.issued_at),
             "created_at": inv.iso_z(s.issued_at),
             "user_name": s.user.full_name if s.user else None,
@@ -172,6 +175,8 @@ def get_sales_report(
             "id": r.id,
             "credit_note_number": r.credit_note_number,
             "original_invoice_number": r.original_invoice_number,
+            "sale_id": r.sale_id,
+            "customer_name": r.sale.customer.name if r.sale and r.sale.customer else None,
             "total": _f(r.total),
             "vat_amount": _f(r.vat_amount),
             "reason": r.reason,

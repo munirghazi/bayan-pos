@@ -43,7 +43,10 @@ export const authAPI = {
 export const productsAPI = {
   ensureBarcodes: (product_ids) => api.post('/products/ensure-barcodes', { product_ids }),
   getAll: () => api.get('/products/'),
-  getAllAdmin: () => api.get('/products/all'),
+  getAllAdmin: (includeInactive = false) => api.get('/products/all' + (includeInactive ? '?include_inactive=true' : '')),
+  usage: (id) => api.get(`/products/${id}/usage`),
+  archive: (id) => api.post(`/products/${id}/archive`),
+  restore: (id) => api.post(`/products/${id}/restore`),
   get: (id) => api.get(`/products/${id}`),
   create: (data) => api.post('/products/', data),
   update: (id, data) => api.put(`/products/${id}`, data),
@@ -194,7 +197,10 @@ export const deliveryAPI = {
 };
 
 export const suppliersAPI = {
-  getAll: (q) => api.get('/suppliers/' + (q ? `?q=${encodeURIComponent(q)}` : '')),
+  getAll: (q, archived = false) => api.get('/suppliers/', { params: { q: q || undefined, archived: archived || undefined } }),
+  usage: (id) => api.get(`/suppliers/${id}/usage`),
+  archive: (id) => api.post(`/suppliers/${id}/archive`),
+  restore: (id) => api.post(`/suppliers/${id}/restore`),
   get: (id) => api.get(`/suppliers/${id}`),
   create: (data) => api.post('/suppliers/', data),
   update: (id, data) => api.put(`/suppliers/${id}`, data),

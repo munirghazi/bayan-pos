@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { reportsAPI, salesAPI, donationsAPI, apiError } from '../services/api';
+import { reportsAPI, salesAPI, returnsAPI, donationsAPI, apiError } from '../services/api';
 import { getCapabilities } from '../utils/posSettings';
 import { fmtDateTime } from '../utils/datetime';
 import { openProof } from '../utils/proofs';
@@ -152,10 +152,25 @@ export default function Reports() {
     }
   };
 
+  const [selectedCN, setSelectedCN] = useState(null);
+  const openCreditNote = async (id) => {
+    try {
+      const { data } = await returnsAPI.get(id);
+      setSelectedCN(data); setSelectedSale(null); setSelectedDonation(null); setShowReceipt(true);
+    } catch (err) { toast.error(apiError(err, 'تعذّر تحميل الإشعار')); }
+  };
+  const openSaleById = async (saleId) => {
+    try {
+      const { data } = await salesAPI.get(saleId);
+      setSelectedSale(data); setSelectedCN(null); setSelectedDonation(null); setShowReceipt(true);
+    } catch (err) { toast.error(apiError(err, 'تعذّر تحميل الفاتورة')); }
+  };
+
   const closeReceipt = () => {
     setShowReceipt(false);
     setSelectedSale(null);
     setSelectedDonation(null);
+    setSelectedCN(null);
   };
 
   return (
@@ -278,6 +293,7 @@ export default function Reports() {
               <thead className="bg-gray-50">
                 <tr>
                   <th className="text-right px-6 py-3 text-sm font-medium text-gray-500">رقم الفاتورة</th>
+                  <th className="text-right px-4 py-3 text-sm font-medium text-gray-500">العميل</th>
                   <th className="text-right px-6 py-3 text-sm font-medium text-gray-500">المنتجات</th>
                   <th className="text-right px-6 py-3 text-sm font-medium text-gray-500">المجموع</th>
                   <th className="text-right px-6 py-3 text-sm font-medium text-gray-500">طريقة الدفع</th>
@@ -292,6 +308,10 @@ export default function Reports() {
                   <>
                     <tr key={sale.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => toggleExpandSale(sale.id)}>
                       <td className="px-6 py-4 text-sm text-gray-600" dir="ltr">{sale.invoice_number}</td>
+                      <td className="px-4 py-4 text-sm text-gray-700">
+                        {sale.customer_name || <span className="text-gray-300">—</span>}
+                        {sale.customer_phone && <div className="text-xs text-gray-400" dir="ltr">{sale.customer_phone}</div>}
+                      </td>
                       <td className="px-6 py-4 text-sm text-gray-700 max-w-xs">
                         <div className="truncate" title={sale.products_summary}>
                           {sale.products_summary || `${sale.items_count} منتجات`}
@@ -323,7 +343,7 @@ export default function Reports() {
                     {/* Expanded details row */}
                     {expandedSale === sale.id && sale.items && (
                       <tr key={`${sale.id}-details`}>
-                        <td colSpan="8" className="px-6 py-3 bg-gray-50">
+                        <td colSpan="9" className="px-6 py-3 bg-gray-50">
                           <div className="mr-8">
                             <table className="w-full text-sm">
                               <thead>
@@ -370,6 +390,53 @@ export default function Reports() {
               <p className="text-center py-12 text-gray-400">لا توجد مبيعات في هذه الفترة</p>
             )}
           </div>
+
+          {/* Credit notes: each opens, and so does its original invoice */}
+          {salesData.credit_notes?.length > 0 && (
+            <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+              <div className="px-6 py-3 border-b font-bold text-gray-800">الإشعارات الدائنة ({salesData.credit_notes.length})</div>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="text-right px-6 py-3 text-sm font-medium text-gray-500">رقم الإشعار</th>
+                      <th className="text-right px-4 py-3 text-sm font-medium text-gray-500">الفاتورة الأصلية</th>
+                      <th className="text-right px-4 py-3 text-sm font-medium text-gray-500">العميل</th>
+                      <th className="text-right px-4 py-3 text-sm font-medium text-gray-500">المبلغ المسترد</th>
+                      <th className="text-right px-4 py-3 text-sm font-medium text-gray-500">طريقة الاسترداد</th>
+                      <th className="text-right px-4 py-3 text-sm font-medium text-gray-500">السبب</th>
+                      <th className="text-right px-4 py-3 text-sm font-medium text-gray-500">التاريخ</th>
+                      <th className="px-4 py-3 text-sm font-medium text-gray-500">عرض</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {salesData.credit_notes.map((cn) => (
+                      <tr key={cn.id} className="hover:bg-gray-50">
+                        <td className="px-6 py-3 text-sm text-gray-700" dir="ltr">
+                          <button onClick={() => openCreditNote(cn.id)} className="text-red-600 hover:underline font-medium">{cn.credit_note_number}</button>
+                        </td>
+                        <td className="px-4 py-3 text-sm" dir="ltr">
+                          {cn.sale_id
+                            ? <button onClick={() => openSaleById(cn.sale_id)} className="text-bayan-green hover:underline">{cn.original_invoice_number}</button>
+                            : cn.original_invoice_number}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-700">{cn.customer_name || <span className="text-gray-300">—</span>}</td>
+                        <td className="px-4 py-3 font-bold text-red-600">-{cn.total.toFixed(2)} <SarIcon size={13} /></td>
+                        <td className="px-4 py-3 text-sm text-gray-600">{paymentMethodAr[cn.refund_method] || '—'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-600 max-w-xs truncate" title={cn.reason || ''}>{cn.reason || '—'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-600">{fmtDateTime(cn.issued_at)}</td>
+                        <td className="px-4 py-3 text-center">
+                          <button onClick={() => openCreditNote(cn.id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg" title="عرض / طباعة الإشعار">
+                            <HiOutlinePrinter className="text-lg" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </>
       )}
 
@@ -451,11 +518,11 @@ export default function Reports() {
       )}
 
       {/* ========== Reprint: same document window as everywhere ========== */}
-      {showReceipt && (selectedSale || selectedDonation) && (
+      {showReceipt && (selectedSale || selectedDonation || selectedCN) && (
         <DocumentModal
-          type={selectedDonation ? 'donation' : 'sale'}
-          doc={selectedDonation || selectedSale}
-          phone={selectedSale?.customer_phone || ''}
+          type={selectedDonation ? 'donation' : selectedCN ? 'credit_note' : 'sale'}
+          doc={selectedDonation || selectedCN || selectedSale}
+          phone={(selectedSale || selectedCN)?.customer_phone || ''}
           onClose={closeReceipt}
         />
       )}

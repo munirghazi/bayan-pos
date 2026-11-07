@@ -370,12 +370,82 @@ def update_product(product_id: int, request: ProductUpdate, db: Session = Depend
 
 @router.delete("/{product_id}")
 def delete_product(product_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_perm("products"))):
+    """Permanent delete ONLY for a product with no history and no stock (e.g. added by
+    mistake). Anything else must be archived (tester: stock and history vanished)."""
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="المنتج غير موجود")
+    u = product_usage(db, product)
+    if not u["deletable"]:
+        raise HTTPException(status_code=409, detail=(
+            "لا يمكن حذف منتج له حركات أو رصيد: " + u["summary"] + ". يمكنك أرشفته بدلاً من ذلك."))
+    db.query(KitComponent).filter(KitComponent.kit_product_id == product.id).delete()
+    db.delete(product)
+    db.commit()
+    return {"message": "تم حذف المنتج نهائياً"}
+
+
+def product_usage(db: Session, product: Product) -> dict:
+    from sqlalchemy import text as _t
+    q = lambda sql: db.execute(_t(sql), {"p": product.id}).scalar() or 0   # noqa: E731
+    counts = {
+        "sales": q("SELECT count(*) FROM sale_items WHERE product_id = :p"),
+        "returns": q("SELECT count(*) FROM return_items WHERE product_id = :p"),
+        "purchase_orders": q("SELECT count(*) FROM purchase_order_lines WHERE product_id = :p"),
+        "receipts": q("SELECT count(*) FROM goods_receipt_lines WHERE product_id = :p"),
+        "movements": q("SELECT count(*) FROM stock_movements WHERE product_id = :p"),
+        "consignment": q("SELECT count(*) FROM consignment_items WHERE product_id = :p"),
+        "in_kits": q("SELECT count(*) FROM kit_components kc JOIN products k ON k.id = kc.kit_product_id "
+                     "WHERE kc.component_product_id = :p AND k.is_active"),
+    }
+    stock = 0 if product.is_kit else float(product.stock or 0)
+    labels = {"sales": "فواتير", "returns": "مرتجعات", "purchase_orders": "أوامر شراء", "receipts": "سندات استلام",
+              "movements": "حركات مخزون", "consignment": "أمانات", "in_kits": "مكوّن في منتج مجمّع"}
+    parts = [f"{labels[k]} ({v})" for k, v in counts.items() if v]
+    if stock:
+        parts.insert(0, f"رصيد حالي {stock:g}")
+    blockers = []
+    if stock:
+        blockers.append(f"الرصيد الحالي {stock:g} — سوِّه إلى صفر أولاً من «حركة المخزون»")
+    if counts["in_kits"]:
+        blockers.append("مكوّن في منتج مجمّع نشط — أزله من المنتج المجمّع أولاً")
+    return {"counts": counts, "stock": stock, "summary": "، ".join(parts) or "لا يوجد",
+            "deletable": not any(counts.values()) and not stock,
+            "archivable": not blockers, "archive_blockers": blockers, "is_active": bool(product.is_active)}
+
+
+@router.get("/{product_id}/usage")
+def get_product_usage(product_id: int, db: Session = Depends(get_db),
+                      current_user: User = Depends(require_perm("products"))):
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="المنتج غير موجود")
+    return product_usage(db, product)
+
+
+@router.post("/{product_id}/archive")
+def archive_product(product_id: int, db: Session = Depends(get_db),
+                    current_user: User = Depends(require_perm("products"))):
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="المنتج غير موجود")
+    u = product_usage(db, product)
+    if not u["archivable"]:
+        raise HTTPException(status_code=409, detail="لا يمكن أرشفة المنتج: " + "؛ ".join(u["archive_blockers"]))
     product.is_active = False
     db.commit()
-    return {"message": "تم حذف المنتج بنجاح"}
+    return {"message": "تمت أرشفة المنتج — يبقى سجله وحركاته، ويمكن استعادته"}
+
+
+@router.post("/{product_id}/restore")
+def restore_product(product_id: int, db: Session = Depends(get_db),
+                    current_user: User = Depends(require_perm("products"))):
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="المنتج غير موجود")
+    product.is_active = True
+    db.commit()
+    return {"message": "تمت استعادة المنتج"}
 
 
 @router.post("/upload-image")

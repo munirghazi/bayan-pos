@@ -133,9 +133,9 @@ def _supplier_detail(sup: Supplier) -> dict:
 # ===================== Supplier CRUD =====================
 
 @router.get("/")
-def list_suppliers(q: str | None = None, db: Session = Depends(get_db),
+def list_suppliers(q: str | None = None, archived: bool = False, db: Session = Depends(get_db),
                    user: User = Depends(get_current_user)):
-    query = db.query(Supplier).filter(Supplier.is_active == True)  # noqa: E712
+    query = db.query(Supplier).filter(Supplier.is_active == (not archived))
     if q:
         query = query.filter(or_(Supplier.name.ilike(f"%{q}%"), Supplier.iban.ilike(f"%{q}%")))
     return [_supplier_summary(s) for s in query.order_by(Supplier.name).all()]
@@ -176,12 +176,63 @@ def update_supplier(supplier_id: int, req: SupplierUpdate, db: Session = Depends
 @router.delete("/{supplier_id}")
 def delete_supplier(supplier_id: int, db: Session = Depends(get_db),
                     user: User = Depends(require_perm("suppliers"))):
+    """Permanent delete only without purchase orders / products / consignors."""
     sup = db.query(Supplier).filter(Supplier.id == supplier_id).first()
     if not sup:
         raise HTTPException(status_code=404, detail="المورّد غير موجود")
+    u = supplier_usage(db, sup)
+    if not u["deletable"]:
+        raise HTTPException(status_code=409, detail=(
+            "لا يمكن حذف مورّد له تعاملات: " + u["summary"] + ". يمكنك أرشفته بدلاً من ذلك."))
+    db.delete(sup)
+    db.commit()
+    return {"message": "تم حذف المورّد نهائياً"}
+
+
+def supplier_usage(db: Session, sup: Supplier) -> dict:
+    from sqlalchemy import text as _t
+    q = lambda sql: db.execute(_t(sql), {"s": sup.id}).scalar() or 0   # noqa: E731
+    counts = {
+        "purchase_orders": q("SELECT count(*) FROM purchase_orders WHERE supplier_id = :s"),
+        "open_purchase_orders": q("SELECT count(*) FROM purchase_orders WHERE supplier_id = :s "
+                                  "AND status NOT IN ('cancelled','received','closed')"),
+        "products": q("SELECT count(*) FROM products WHERE default_supplier_id = :s"),
+        "consignors": q("SELECT count(*) FROM consignors WHERE supplier_id = :s"),
+    }
+    labels = {"purchase_orders": "أوامر شراء", "products": "منتجات مرتبطة به", "consignors": "مودِعو أمانات"}
+    parts = [f"{labels[k]} ({counts[k]})" for k in labels if counts[k]]
+    blockers = [f"له {counts['open_purchase_orders']} أمر شراء مفتوح — أكمله أو ألغه أولاً"] if counts["open_purchase_orders"] else []
+    return {"counts": counts, "summary": "، ".join(parts) or "لا يوجد",
+            "deletable": not (counts["purchase_orders"] or counts["products"] or counts["consignors"]),
+            "archivable": not blockers, "archive_blockers": blockers, "is_active": bool(sup.is_active)}
+
+
+@router.get("/{supplier_id}/usage")
+def get_supplier_usage(supplier_id: int, db: Session = Depends(get_db),
+                       user: User = Depends(require_perm("suppliers"))):
+    sup = _get_supplier(db, supplier_id)
+    return supplier_usage(db, sup)
+
+
+@router.post("/{supplier_id}/archive")
+def archive_supplier(supplier_id: int, db: Session = Depends(get_db),
+                     user: User = Depends(require_perm("suppliers"))):
+    sup = _get_supplier(db, supplier_id)
+    u = supplier_usage(db, sup)
+    if not u["archivable"]:
+        raise HTTPException(status_code=409, detail="لا يمكن أرشفة المورّد: " + "؛ ".join(u["archive_blockers"]))
     sup.is_active = False
     db.commit()
-    return {"message": "تم تعطيل المورّد"}
+    return {"message": "تمت أرشفة المورّد — يبقى سجله وتعاملاته، ويمكن استعادته"}
+
+
+@router.post("/{supplier_id}/restore")
+def restore_supplier(supplier_id: int, db: Session = Depends(get_db),
+                     user: User = Depends(require_perm("suppliers"))):
+    sup = _get_supplier(db, supplier_id)
+    sup.is_active = True
+    db.commit()
+    return {"message": "تمت استعادة المورّد"}
 
 
 @router.get("/{supplier_id}/compliance")

@@ -131,6 +131,15 @@ const Receipt = forwardRef(({ sale, type = 'sale', donation = null, creditNote =
               <span>التاريخ والوقت</span>
               <span>{fmtDateTime(doc.issued_at || doc.created_at)}</span>
             </div>
+            {doc.customer_name && (
+              <div className="flex justify-between">
+                <span>العميل</span>
+                <span className="font-medium">
+                  {doc.customer_name}
+                  {doc.customer_phone && <span dir="ltr" className="mr-1 text-gray-500">{doc.customer_phone}</span>}
+                </span>
+              </div>
+            )}
             {type === 'credit_note' && (
               <>
                 <div className="flex justify-between">

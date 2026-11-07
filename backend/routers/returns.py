@@ -59,6 +59,8 @@ def _format_return(r: Return) -> dict:
         "seller": r.seller or {},
         "qr_data": r.qr_data,
         "original_issued_at": r.sale.issued_at if r.sale else None,
+        "customer_name": r.sale.customer.name if r.sale and r.sale.customer else None,
+        "customer_phone": r.sale.customer.phone if r.sale and r.sale.customer else None,
         "issued_at": r.issued_at,
         "created_at": r.created_at,
         "items": [

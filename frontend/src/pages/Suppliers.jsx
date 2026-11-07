@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { can } from '../utils/perms';
 import { suppliersAPI, apiError } from '../services/api';
+import ArchiveDialog from '../components/ArchiveDialog';
 import toast from 'react-hot-toast';
 import {
   HiOutlineTruck, HiOutlinePlus, HiOutlineTrash, HiOutlineCheckCircle,
@@ -27,12 +28,14 @@ export default function Suppliers() {
   const [savedAt, setSavedAt] = useState({});     // doc_type -> 'تم حفظ …' (clear confirmation)
   const editable = can('suppliers');
   const submittingRef = useRef(false);
+  const [archiving, setArchiving] = useState(null);
+  const [showArchived, setShowArchived] = useState(false);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [showArchived]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const load = async () => {
     try {
-      const res = await suppliersAPI.getAll();
+      const res = await suppliersAPI.getAll(null, showArchived);
       setSuppliers(res.data);
     } catch (err) { toast.error(apiError(err, 'خطأ في التحميل')); }
   };
@@ -78,13 +81,10 @@ export default function Suppliers() {
     } finally { submittingRef.current = false; }
   };
 
-  const deactivate = async (id) => {
-    if (!confirm('تعطيل هذا المورّد؟')) return;
-    try {
-      await suppliersAPI.delete(id);
-      if (selected && selected.id === id) setSelected(null);
-      load();
-    } catch (err) { toast.error(apiError(err, 'خطأ')); }
+  const deactivate = (id) => setArchiving(suppliers.find((x) => x.id === id) || null);
+  const restore = async (sup) => {
+    try { await suppliersAPI.restore(sup.id); toast.success(`تمت استعادة «${sup.name}»`); load(); }
+    catch (e) { toast.error(apiError(e, 'تعذّرت الاستعادة')); }
   };
 
   const saveDoc = async (docType) => {
@@ -154,7 +154,12 @@ export default function Suppliers() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Supplier list */}
         <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
-          <div className="px-4 py-3 bg-gray-50 border-b font-bold text-gray-800">القائمة ({suppliers.length})</div>
+          <div className="px-4 py-3 bg-gray-50 border-b font-bold text-gray-800 flex items-center justify-between">
+            <span>{showArchived ? 'المؤرشفون' : 'القائمة'} ({suppliers.length})</span>
+            <button onClick={() => { setShowArchived(!showArchived); setSelected(null); }} className="text-sm font-normal text-bayan-green hover:underline">
+              {showArchived ? '← الموردون النشطون' : 'عرض المؤرشفين'}
+            </button>
+          </div>
           {suppliers.length === 0 ? (
             <p className="p-4 text-gray-400 text-sm">لا يوجد موردون</p>
           ) : (
@@ -173,7 +178,8 @@ export default function Suppliers() {
                     <span className={`text-xs px-2 py-0.5 rounded-full ${s.is_compliant ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
                       {s.is_compliant ? 'معتمد' : 'غير معتمد'}
                     </span>
-                    {editable && <button onClick={(e) => { e.stopPropagation(); deactivate(s.id); }} className="text-red-400 hover:text-red-600" title="تعطيل المورّد">
+                    {editable && showArchived && <button onClick={(e) => { e.stopPropagation(); restore(s); }} className="text-sm text-bayan-green hover:underline">استعادة</button>}
+                    {editable && !showArchived && <button onClick={(e) => { e.stopPropagation(); deactivate(s.id); }} className="text-red-400 hover:text-red-600" title="حذف أو أرشفة">
                       <HiOutlineTrash />
                     </button>}
                   </div>
@@ -259,6 +265,14 @@ export default function Suppliers() {
           )}
         </div>
       </div>
+      {archiving && (
+        <ArchiveDialog title="حذف أو أرشفة مورّد" name={archiving.name} noun="المورّد"
+          loadUsage={() => suppliersAPI.usage(archiving.id)}
+          onArchive={() => suppliersAPI.archive(archiving.id)}
+          onDelete={() => suppliersAPI.delete(archiving.id)}
+          onClose={() => setArchiving(null)}
+          onDone={() => { if (selected && selected.id === archiving.id) setSelected(null); setArchiving(null); load(); }} />
+      )}
     </div>
   );
 }
