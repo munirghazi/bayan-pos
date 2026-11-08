@@ -43,7 +43,7 @@ export default function PurchaseOrders() {
       ]);
       setOrders(o.data);
       setSuppliers(s.data);
-      setProducts(p.data);
+      setProducts(p.data.filter((x) => !x.is_kit)); // bundles are assembled, never bought
       setUnits(u.data);
     } catch (err) { toast.error(apiError(err, 'خطأ في التحميل')); }
   };

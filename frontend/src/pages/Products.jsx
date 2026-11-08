@@ -362,7 +362,7 @@ export default function Products({ embedded = false }) {
               </div>
               <div className="flex items-center justify-between mt-3">
                 <span className={`text-sm ${product.is_low_stock ? 'text-red-500 font-bold' : 'text-gray-500'}`}>
-                  المخزون: {product.is_kit ? (product.available_stock ?? 0) : product.stock}
+                  {product.is_kit ? `متاح للتجميع: ${product.available_stock ?? 0}` : `المخزون: ${product.stock}`}
                   {product.is_low_stock && (
                     <span className="mr-2 text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full">منخفض</span>
                   )}
@@ -483,6 +483,12 @@ export default function Products({ embedded = false }) {
                 {/* 3 — stock, unit, supplier */}
                 <section className="space-y-3">
                   <h3 className="text-xs font-bold text-gray-500">المخزون والوحدة والمورّد</h3>
+                  {form.is_kit ? (
+                    <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-800 space-y-1">
+                      <p className="font-bold">منتج مُجمّع — لا يُشترى ولا يُخزَّن</p>
+                      <p className="text-xs">يُباع بالحبة ويُجمَّع من مكوّناته لحظة البيع. الكمية المتاحة = أقل ما تسمح به مكوّناته. اشترِ المكوّنات وأدخلها للمخزون، لا المنتج المُجمّع.</p>
+                    </div>
+                  ) : (
                   <div className="rounded-xl border border-gray-200 p-3 space-y-3">
                     <p className="text-xs text-gray-500">الوحدات والتعبئة — من القائمة الموحّدة في «وحدات القياس»</p>
                     <Field label="الوحدة الأساسية (يُحسب بها المخزون)">
@@ -518,6 +524,7 @@ export default function Products({ embedded = false }) {
                     )}
                     <p className="text-xs text-gray-400">مثال: الأساسية «حبة»، الشراء «كرتون» (= 24 حبة)، البيع «حبة». يتحوّل المخزون تلقائياً.</p>
                   </div>
+                  )}
                   <div className="grid grid-cols-2 gap-3">
                     <Field label={editingProduct ? 'الكمية الحالية' : 'الكمية الافتتاحية'} hint={form.is_kit ? 'تُحسب من المكوّنات' : editingProduct ? 'للتعديل استخدم «حركة المخزون»' : undefined}>
                       <Input type="number" min="0" step="any" value={form.is_kit ? '' : form.stock} disabled={form.is_kit || !!editingProduct}
@@ -527,6 +534,7 @@ export default function Products({ embedded = false }) {
                       <Input type="number" min="0" step="any" value={form.reorder_level} onChange={(e) => setForm({ ...form, reorder_level: e.target.value })} placeholder="0" />
                     </Field>
                   </div>
+                  {!form.is_kit && (
                   <Field label="المورّد الافتراضي">
                     <div className="flex gap-2">
                       <Select value={form.default_supplier_id} onChange={(e) => setForm({ ...form, default_supplier_id: e.target.value })}>
@@ -538,6 +546,7 @@ export default function Products({ embedded = false }) {
                       )}
                     </div>
                   </Field>
+                  )}
                   {quickSupplier && (
                     <div className="rounded-xl border border-bayan-green/40 bg-bayan-light/20 p-3 space-y-2">
                       <p className="text-sm font-medium text-gray-700">مورّد جديد</p>

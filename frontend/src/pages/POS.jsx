@@ -182,6 +182,7 @@ export default function POS() {
   };
 
   const availOf = (p) => (p.available_stock != null ? p.available_stock : p.stock);
+  const fmtQty = (n) => Number(Number(n || 0).toFixed(3));
   const consignAsProducts = consignLots.map((lot) => ({
     id: 'c' + lot.id, name: lot.product_name, price: lot.unit_price,
     stock: lot.qty_remaining, available_stock: lot.qty_remaining,
@@ -230,7 +231,7 @@ export default function POS() {
       )}
       <p className="font-medium text-gray-800 text-sm truncate">{product.name}</p>
       <p className="text-bayan-green font-bold mt-1">{(product.price || 0).toFixed(2)} <SarIcon size={14} /></p>
-      <p className="text-xs text-gray-400 mt-1">المتبقي: {product.stock}</p>
+      <p className="text-xs text-gray-400 mt-1">{product.is_kit ? 'متاح للتجميع' : 'المتبقي'}: {fmtQty(availOf(product))}</p>
       {product.__consign && (
         <span className="inline-block mt-1 text-[10px] bg-amber-100 text-amber-700 rounded px-1.5 py-0.5">أمانة · {product.__consign.consignor_name || ''}</span>
       )}
@@ -247,7 +248,7 @@ export default function POS() {
           {product.__consign ? ` · أمانة ${product.__consign.consignor_name || ''}` : ''}
         </span>
       </span>
-      <span className="text-xs text-gray-400 whitespace-nowrap">المتبقي {product.stock}</span>
+      <span className="text-xs text-gray-400 whitespace-nowrap">{product.is_kit ? 'متاح للتجميع' : 'المتبقي'} {fmtQty(availOf(product))}</span>
       <span className="text-bayan-green font-bold whitespace-nowrap w-24 text-left">{(product.price || 0).toFixed(2)} <SarIcon size={13} /></span>
     </button>
   );

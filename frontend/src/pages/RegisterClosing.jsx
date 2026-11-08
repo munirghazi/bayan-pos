@@ -2,7 +2,10 @@ import { useState, useEffect } from 'react';
 import { registersAPI, apiError } from '../services/api';
 import { SarIcon } from '../components/SarIcon';
 import toast from 'react-hot-toast';
-import { HiOutlineCalculator, HiOutlineRefresh } from 'react-icons/hi';
+import { HiOutlineCalculator, HiOutlineRefresh, HiOutlineDocumentReport, HiOutlineDocumentDownload } from 'react-icons/hi';
+import SessionReport from '../components/SessionReport';
+import { fmtDateTime } from '../utils/datetime';
+import { downloadReportPDF, money as fmtMoney, ltr } from '../utils/reportPDF';
 
 export default function RegisterClosing() {
   const [registers, setRegisters] = useState([]);
@@ -13,6 +16,39 @@ export default function RegisterClosing() {
   const [openingFloat, setOpeningFloat] = useState('');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
+  const [session, setSession] = useState(null);
+  const regName = registers.find((r) => String(r.id) === String(registerId))?.name || '';
+
+  const openCurrent = async () => {
+    try { const { data } = await registersAPI.currentSession(registerId); setSession(data); }
+    catch (e) { toast.error(apiError(e, 'تعذّر تحميل تقرير الجلسة')); }
+  };
+  const openClosing = async (closingId) => {
+    try { const { data } = await registersAPI.session(registerId, closingId); setSession(data); }
+    catch (e) { toast.error(apiError(e, 'تعذّر تحميل تقرير الجلسة')); }
+  };
+  const historyPDF = async () => {
+    try {
+      await downloadReportPDF({
+        title: 'سجل إغلاقات الصندوق', meta: [['الصندوق', regName]],
+        sections: [{
+          title: `الإغلاقات (${closings.length})`,
+          columns: [
+            { label: 'من', value: (c) => (c.opened_at ? fmtDateTime(c.opened_at) : 'بداية التشغيل') },
+            { label: 'إلى (الإغلاق)', value: (c) => fmtDateTime(c.closed_at) },
+            { label: 'بواسطة', value: (c) => c.closed_by || '—' },
+            { label: 'الفواتير', key: 'sales_count', align: 'left' },
+            { label: 'المبيعات', value: (c) => fmtMoney(c.total_sales), align: 'left' },
+            { label: 'متوقع', value: (c) => fmtMoney(c.expected_cash), align: 'left' },
+            { label: 'معدود', value: (c) => fmtMoney(c.counted_cash), align: 'left' },
+            { label: 'الفرق', value: (c) => ltr(`${c.variance > 0 ? '+' : ''}${fmtMoney(c.variance)}`), align: 'left' },
+          ],
+          rows: closings,
+        }],
+        filename: `سجل_إغلاقات_${regName}`,
+      });
+    } catch (e) { toast.error('تعذّر إنشاء ملف PDF'); }
+  };
 
   useEffect(() => { loadRegisters(); }, []);
   useEffect(() => { if (registerId) { loadZ(); loadClosings(); } }, [registerId]);
@@ -53,6 +89,7 @@ export default function RegisterClosing() {
       setCountedCash(''); setOpeningFloat(''); setNote('');
       setZreport({ ...data, sales_count: 0, total_sales: 0, by_method: { cash: 0, card: 0, transfer: 0, other: 0 }, expected_cash: 0 });
       loadZ(); loadClosings();
+      if (data.closing_id) openClosing(data.closing_id);   // show the Z report to print right away
     } catch (e) { toast.error(apiError(e, 'تعذر إغلاق الصندوق')); }
     finally { setBusy(false); }
   };
@@ -82,7 +119,13 @@ export default function RegisterClosing() {
 
       {/* Z-report preview */}
       <div className="bg-white rounded-xl border p-6 space-y-3">
-        <h2 className="font-bold text-gray-800">ملخص الفترة الحالية (منذ آخر إغلاق)</h2>
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <h2 className="font-bold text-gray-800">ملخص الفترة الحالية (منذ آخر إغلاق)</h2>
+          <button onClick={openCurrent} disabled={!registerId}
+                  className="flex items-center gap-1 text-sm bg-indigo-50 text-indigo-700 hover:bg-indigo-100 px-3 py-1.5 rounded-lg disabled:opacity-40">
+            <HiOutlineDocumentReport /> تقرير الجلسة الحالية (X)
+          </button>
+        </div>
         {zreport ? (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
             <Stat label="عدد المبيعات" value={zreport.sales_count} />
@@ -127,7 +170,14 @@ export default function RegisterClosing() {
 
       {/* History */}
       <div className="bg-white rounded-xl border p-6">
-        <h2 className="font-bold text-gray-800 mb-3">سجل الإغلاقات</h2>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="font-bold text-gray-800">سجل الإغلاقات</h2>
+          {closings.length > 0 && (
+            <button onClick={historyPDF} className="flex items-center gap-1 text-sm text-red-700 hover:text-red-800">
+              <HiOutlineDocumentDownload /> تصدير PDF
+            </button>
+          )}
+        </div>
         {closings.length === 0 ? (
           <p className="text-gray-400 text-sm">لا يوجد إغلاقات بعد.</p>
         ) : (
@@ -141,18 +191,22 @@ export default function RegisterClosing() {
                   <th className="text-right">متوقع</th>
                   <th className="text-right">معدود</th>
                   <th className="text-right">الفرق</th>
+                  <th className="text-right">التقرير</th>
                 </tr>
               </thead>
               <tbody>
                 {closings.map((c) => (
                   <tr key={c.id} className="border-b last:border-0">
-                    <td className="py-2">{c.closed_at ? new Date(c.closed_at).toLocaleString('ar') : '—'}</td>
+                    <td className="py-2">{c.closed_at ? fmtDateTime(c.closed_at) : '—'}</td>
                     <td>{c.closed_by || '—'}</td>
                     <td>{money(c.total_sales)}</td>
                     <td>{money(c.expected_cash)}</td>
                     <td>{money(c.counted_cash)}</td>
                     <td className={c.variance === 0 ? '' : (c.variance > 0 ? 'text-green-600' : 'text-red-600')}>
                       {c.variance > 0 ? '+' : ''}{money(c.variance)}
+                    </td>
+                    <td>
+                      <button onClick={() => openClosing(c.id)} className="text-indigo-700 hover:underline">عرض</button>
                     </td>
                   </tr>
                 ))}
@@ -161,6 +215,7 @@ export default function RegisterClosing() {
           </div>
         )}
       </div>
+      {session && <SessionReport report={session} onClose={() => setSession(null)} />}
     </div>
   );
 }

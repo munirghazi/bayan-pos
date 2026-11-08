@@ -7,6 +7,7 @@ import { SarIcon, SAR_TEXT } from '../components/SarIcon';
 import DocumentModal from '../components/DocumentModal';
 import { printReceipt } from '../utils/printReceipt';
 import { generatePDFBlob, downloadPDF } from '../utils/generatePDF';
+import { downloadReportPDF, money, neg, ltr } from '../utils/reportPDF';
 import toast from 'react-hot-toast';
 import {
   HiOutlineChartBar,
@@ -77,11 +78,11 @@ export default function Reports() {
 
     if (activeTab === 'sales' && salesData) {
       csv = '\uFEFF'; // BOM for Arabic
-      csv += `رقم الفاتورة,المنتجات,غير شامل الضريبة (${SAR_TEXT}),الضريبة (${SAR_TEXT}),الإجمالي (${SAR_TEXT}),طريقة الدفع,عدد المنتجات,الموظف,التاريخ\n`;
+      csv += `رقم الفاتورة,العميل,المنتجات,غير شامل الضريبة (${SAR_TEXT}),الضريبة (${SAR_TEXT}),الإجمالي (${SAR_TEXT}),طريقة الدفع,عدد المنتجات,الموظف,التاريخ\n`;
       salesData.sales.forEach((s) => {
         // Escape product summary for CSV (replace commas with semicolons)
         const productsSafe = (s.products_summary || '').replace(/,/g, '؛');
-        csv += `${s.invoice_number},"${productsSafe}",${s.subtotal},${s.vat_amount},${s.total},${paymentMethodAr[s.payment_method]},${s.items_count},${s.user_name},"${fmtDateTime(s.issued_at)}"\n`;
+        csv += `${s.invoice_number},"${(s.customer_name || '').replace(/"/g, "'")}","${productsSafe}",${s.subtotal},${s.vat_amount},${s.total},${paymentMethodAr[s.payment_method]},${s.items_count},${s.user_name},"${fmtDateTime(s.issued_at)}"\n`;
       });
 
       // Add detailed items section
@@ -120,6 +121,87 @@ export default function Reports() {
     link.href = URL.createObjectURL(blob);
     link.download = filename;
     link.click();
+  };
+
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const exportPDF = async () => {
+    const period = startDate === endDate ? `يوم ${ltr(startDate)}` : `من ${ltr(startDate)} إلى ${ltr(endDate)}`;
+    let def = null;
+    if (activeTab === 'sales' && salesData) {
+      const sm = salesData.summary;
+      def = {
+        title: 'تقرير المبيعات', subtitle: period,
+        summary: [
+          { label: 'إجمالي المبيعات', value: money(sm.total) },
+          { label: 'عدد العمليات', value: sm.count },
+          { label: 'نقدي', value: money(sm.cash_total) },
+          { label: 'شبكة + تحويل', value: money((sm.card_total || 0) + (sm.transfer_total || 0)) },
+          { label: 'ضريبة المبيعات', value: money(sm.vat_total) },
+          { label: `الإشعارات الدائنة (${sm.credit_notes_count})`, value: neg(sm.credit_notes_total), color: '#dc2626' },
+          { label: 'صافي المبيعات', value: money(sm.net_total) },
+          { label: 'صافي الضريبة المستحقة', value: money(sm.net_vat) },
+        ],
+        sections: [
+          {
+            title: `الفواتير (${salesData.sales.length})`, emptyText: 'لا توجد مبيعات في هذه الفترة',
+            columns: [
+              { label: 'رقم الفاتورة', key: 'invoice_number', align: 'left' },
+              { label: 'العميل', value: (r) => r.customer_name || '—' },
+              { label: 'المنتجات', key: 'products_summary' },
+              { label: 'الضريبة', value: (r) => money(r.vat_amount), align: 'left' },
+              { label: 'المجموع', value: (r) => money(r.total), align: 'left' },
+              { label: 'الدفع', value: (r) => paymentMethodAr[r.payment_method] || r.payment_method },
+              { label: 'الموظف', key: 'user_name' },
+              { label: 'التاريخ', value: (r) => fmtDateTime(r.issued_at) },
+            ],
+            rows: salesData.sales,
+            footer: ['', '', 'الإجمالي', money(sm.vat_total), money(sm.total), '', '', ''],
+          },
+          {
+            title: `الإشعارات الدائنة (${(salesData.credit_notes || []).length})`,
+            columns: [
+              { label: 'رقم الإشعار', key: 'credit_note_number', align: 'left' },
+              { label: 'الفاتورة الأصلية', key: 'original_invoice_number', align: 'left' },
+              { label: 'العميل', value: (r) => r.customer_name || '—' },
+              { label: 'المبلغ المسترد', value: (r) => money(r.total), align: 'left' },
+              { label: 'طريقة الاسترداد', value: (r) => paymentMethodAr[r.refund_method] || r.refund_method || '—' },
+              { label: 'السبب', value: (r) => r.reason || '—' },
+              { label: 'التاريخ', value: (r) => fmtDateTime(r.issued_at) },
+            ],
+            rows: salesData.credit_notes || [],
+          },
+        ],
+        filename: `تقرير_المبيعات_${startDate}_${endDate}`,
+      };
+    } else if (activeTab === 'donations' && donationsData) {
+      const sm = donationsData.summary;
+      def = {
+        title: 'تقرير التبرعات', subtitle: period,
+        summary: [
+          { label: 'إجمالي التبرعات', value: money(sm.total) },
+          { label: 'عدد التبرعات', value: sm.count },
+          { label: 'إيصالات ملغاة', value: sm.void_count },
+          { label: 'شبكة + تحويل', value: money((sm.card_total || 0) + (sm.transfer_total || 0)) },
+        ],
+        sections: [{
+          title: `الإيصالات (${donationsData.donations.length})`, emptyText: 'لا توجد تبرعات في هذه الفترة',
+          columns: [
+            { label: 'رقم الإيصال', key: 'receipt_number', align: 'left' },
+            { label: 'المتبرع', value: (r) => r.donor_name || 'مجهول' },
+            { label: 'المبلغ', value: (r) => money(r.amount), align: 'left' },
+            { label: 'طريقة الدفع', value: (r) => paymentMethodAr[r.payment_method] || r.payment_method },
+            { label: 'الحالة', value: (r) => (r.status === 'void' ? `ملغى: ${r.void_reason || ''}` : 'صادر') },
+            { label: 'الموظف', key: 'user_name' },
+            { label: 'التاريخ', value: (r) => fmtDateTime(r.issued_at) },
+          ],
+          rows: donationsData.donations,
+        }],
+        filename: `تقرير_التبرعات_${startDate}_${endDate}`,
+      };
+    }
+    if (!def) return;
+    setPdfBusy(true);
+    try { await downloadReportPDF(def); } catch (e) { toast.error('تعذّر إنشاء ملف PDF'); } finally { setPdfBusy(false); }
   };
 
   const toggleExpandSale = (saleId) => {
@@ -181,13 +263,22 @@ export default function Reports() {
           <h1 className="text-2xl font-bold text-gray-800">التقارير</h1>
           <p className="text-gray-500 mt-1">عرض وتصدير تقارير المبيعات والتبرعات</p>
         </div>
-        <button
-          onClick={exportCSV}
-          className="flex items-center gap-2 bg-bayan-green hover:bg-bayan-dark text-white px-6 py-2 rounded-lg transition-all"
-        >
-          <HiOutlineDocumentDownload />
-          تصدير CSV
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={exportPDF} disabled={pdfBusy || loading}
+            className="flex items-center gap-2 bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white px-5 py-2 rounded-lg transition-all"
+          >
+            <HiOutlineDocumentDownload />
+            {pdfBusy ? 'جاري الإنشاء…' : 'تصدير PDF'}
+          </button>
+          <button
+            onClick={exportCSV}
+            className="flex items-center gap-2 bg-bayan-green hover:bg-bayan-dark text-white px-5 py-2 rounded-lg transition-all"
+          >
+            <HiOutlineDocumentDownload />
+            تصدير CSV
+          </button>
+        </div>
       </div>
 
       {/* Tabs + Filters */}

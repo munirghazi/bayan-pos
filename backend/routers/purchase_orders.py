@@ -81,8 +81,15 @@ def _validate_lines(db, lines: list[POLineIn]):
     for ln in lines:
         if ln.quantity <= 0:
             raise HTTPException(status_code=400, detail="الكمية يجب أن تكون أكبر من صفر")
-        if not db.query(Product).filter(Product.id == ln.product_id).first():
+        prod = db.query(Product).filter(Product.id == ln.product_id).first()
+        if not prod:
             raise HTTPException(status_code=400, detail=f"المنتج رقم {ln.product_id} غير موجود")
+        if prod.is_kit:
+            # A bundle has no stock of its own: buy its components, it is assembled at sale.
+            raise HTTPException(status_code=400,
+                                detail=f"«{prod.name}» منتج مُجمّع ولا يُشترى — اشترِ مكوّناته، ويُجمَّع عند البيع")
+        if not prod.is_active:
+            raise HTTPException(status_code=400, detail=f"«{prod.name}» مؤرشف — استعده أولاً")
 
 
 def _set_lines(db, po, lines: list[POLineIn]):

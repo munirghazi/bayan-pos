@@ -2,10 +2,12 @@ import { useState, useEffect } from 'react';
 import { can } from '../utils/perms';
 import { productsAPI, uomAPI, stockAPI, apiError } from '../services/api';
 import toast from 'react-hot-toast';
-import { HiOutlineArchive, HiOutlinePlusCircle, HiOutlineAdjustments } from 'react-icons/hi';
+import { HiOutlineArchive, HiOutlinePlusCircle, HiOutlineAdjustments, HiOutlineDocumentDownload } from 'react-icons/hi';
+import { fmtDateTime } from '../utils/datetime';
+import { downloadReportPDF } from '../utils/reportPDF';
 
 const TYPE_LABEL = { in: 'إدخال', out: 'إخراج', adjust: 'تسوية' };
-const REF_LABEL = { sale: 'بيع', return: 'مرتجع', manual: 'إدخال يدوي', adjustment: 'جرد' };
+const REF_LABEL = { sale: 'بيع', return: 'مرتجع', manual: 'إدخال يدوي', adjustment: 'جرد', goods_receipt: 'استلام بضاعة' };
 
 export default function Inventory() {
   const [products, setProducts] = useState([]);
@@ -149,7 +151,31 @@ export default function Inventory() {
 
           {/* Ledger */}
           <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
-            <div className="px-4 py-3 bg-gray-50 border-b font-bold text-gray-800">سجل الحركات</div>
+            <div className="px-4 py-3 bg-gray-50 border-b font-bold text-gray-800 flex items-center justify-between">
+              <span>سجل الحركات</span>
+              {movements.length > 0 && (
+                <button onClick={() => downloadReportPDF({
+                  title: 'سجل حركات المخزون', subtitle: selected?.name,
+                  meta: [['الرصيد الحالي', `${selected?.stock ?? ''} ${selected?.uom_name || ''}`]],
+                  sections: [{
+                    title: `الحركات (${movements.length})`,
+                    columns: [
+                      { label: 'التاريخ', value: (m) => fmtDateTime(m.created_at) },
+                      { label: 'النوع', value: (m) => TYPE_LABEL[m.type] || m.type },
+                      { label: 'الكمية', value: (m) => `${m.qty > 0 ? '+' : ''}${m.qty}`, align: 'left' },
+                      { label: 'الرصيد بعدها', key: 'balance_after', align: 'left' },
+                      { label: 'المرجع', value: (m) => `${REF_LABEL[m.ref_type] || m.ref_type || '—'}${m.ref_id ? ` #${m.ref_id}` : ''}` },
+                      { label: 'ملاحظة', value: (m) => m.note || '—' },
+                    ],
+                    rows: movements,
+                  }],
+                  filename: `حركات_${selected?.name || 'منتج'}`,
+                }).catch(() => toast.error('تعذّر إنشاء ملف PDF'))}
+                  className="flex items-center gap-1 text-sm font-normal text-red-700 hover:text-red-800">
+                  <HiOutlineDocumentDownload /> تصدير PDF
+                </button>
+              )}
+            </div>
             {movements.length === 0 ? (
               <p className="p-4 text-gray-400 text-sm">لا توجد حركات</p>
             ) : (
@@ -175,7 +201,7 @@ export default function Inventory() {
                         <td className="p-3">{m.balance_after}</td>
                         <td className="p-3 text-gray-500">{REF_LABEL[m.ref_type] || m.ref_type || '—'}{m.ref_id ? ` #${m.ref_id}` : ''}</td>
                         <td className="p-3 text-gray-500">{m.note || '—'}</td>
-                        <td className="p-3 text-gray-400">{new Date(m.created_at).toLocaleString('ar-EG')}</td>
+                        <td className="p-3 text-gray-400">{fmtDateTime(m.created_at)}</td>
                       </tr>
                     ))}
                   </tbody>

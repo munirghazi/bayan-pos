@@ -55,7 +55,15 @@ def get_dashboard(db: Session = Depends(get_db), current_user: User = Depends(ge
     total_sales = db.query(func.coalesce(func.sum(Sale.total), 0)).scalar()
     total_sales_count = db.query(func.count(Sale.id)).scalar()
 
-    low_stock = db.query(Product).filter(Product.stock <= 5, Product.is_active == True).all()  # noqa: E712
+    # Low stock: a product's reorder level (5 when none is set). A bundle has no
+    # stock of its own, so it is judged by how many can be assembled now.
+    from kits import available_quantity
+    low_stock, memo = [], {}
+    for p in db.query(Product).filter(Product.is_active == True).all():  # noqa: E712
+        avail = available_quantity(db, p, memo)
+        if avail <= float(p.reorder_level or 5):
+            low_stock.append((p, avail))
+    low_stock.sort(key=lambda t: t[1])
     recent_sales = db.query(Sale).order_by(Sale.issued_at.desc(), Sale.id.desc()).limit(5).all()
 
     out = {
@@ -68,7 +76,8 @@ def get_dashboard(db: Session = Depends(get_db), current_user: User = Depends(ge
             "sales_total": _f(total_sales),
             "sales_count": total_sales_count,
         },
-        "low_stock": [{"id": p.id, "name": p.name, "stock": p.stock} for p in low_stock],
+        "low_stock": [{"id": p.id, "name": p.name, "stock": a, "is_kit": p.is_kit}
+                      for p, a in low_stock[:30]],
         "recent_sales": [{
             "id": s.id,
             "invoice_number": s.invoice_number,

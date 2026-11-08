@@ -187,7 +187,7 @@ export default function Dashboard() {
               <div key={product.id} className="flex items-center justify-between p-3 bg-white rounded-lg">
                 <span className="font-medium text-gray-700">{product.name}</span>
                 <span className="bg-orange-100 text-orange-700 px-3 py-1 rounded-full text-sm font-bold">
-                  {product.stock} متبقي
+                  {Number(Number(product.stock || 0).toFixed(3))} {product.is_kit ? 'متاح للتجميع' : 'متبقي'}
                 </span>
               </div>
             ))}

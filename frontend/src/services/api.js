@@ -129,6 +129,8 @@ export const registersAPI = {
   zreport: (id) => api.get(`/registers/${id}/z-report`),
   close: (id, data) => api.post(`/registers/${id}/close`, data),
   closings: (id) => api.get(`/registers/${id}/closings`),
+  currentSession: (id) => api.get(`/registers/${id}/sessions/current`),
+  session: (id, closingId) => api.get(`/registers/${id}/sessions/${closingId}`),
 };
 
 export const customersAPI = {
